@@ -19,7 +19,7 @@ repositories {
 }
 
 def querydslVersion = '5.1.0'
-def springCloudAwsVersion = '3.4.2'
+def springCloudAwsVersion = '4.0.2'
 ext['querydsl.version'] = querydslVersion
 
 def querydslGeneratedDir = layout.buildDirectory.dir('generated/sources/annotationProcessor/java/main')
