@@ -230,6 +230,11 @@ CONSTRAINT chk_content_validation_error_code
         'UNKNOWN_ERROR'
       )
       OR error_code IS NULL
+  ),
+
+CONSTRAINT chk_validation_score
+  CHECK (
+    validation_score >= 0 AND validation_score <= 100
   )
 
 
@@ -280,7 +285,12 @@ CONSTRAINT chk_quiz_set_status
             'COMPLETED',
             'FAILED'
         )
-    )
+    ),
+
+CONSTRAINT chk_question_count
+  CHECK (
+    question_count >= 1 AND question_count <= 5
+  )
 
 
 )
