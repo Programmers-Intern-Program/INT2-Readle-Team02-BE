@@ -13,9 +13,19 @@ public class CustomException extends RuntimeException {
     this.errorCode = errorCode;
   }
 
+  public CustomException(ErrorCode errorCode, String message) {
+    super(message);
+    this.errorCode = Objects.requireNonNull(errorCode, "errorCode must not be null");
+  }
+
   public CustomException(ErrorCode errorCode, Throwable cause) {
     super(Objects.requireNonNull(errorCode, "errorCode must not be null").getMessage(), cause);
     this.errorCode = errorCode;
+  }
+
+  public CustomException(ErrorCode errorCode, String message, Throwable cause) {
+    super(message, cause);
+    this.errorCode = Objects.requireNonNull(errorCode, "errorCode must not be null");
   }
 
   public boolean isServerError() {

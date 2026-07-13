@@ -44,6 +44,17 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  @DisplayName("CustomException에 커스텀 에러 메시지를 제공하면 해당 메시지를 반환한다")
+  void handleCustomExceptionWithCustomMessage() throws Exception {
+    mockMvc
+        .perform(get("/test/custom-exception-message"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+        .andExpect(jsonPath("$.message").value("ID가 5인 회원을 찾을 수 없습니다."))
+        .andExpect(jsonPath("$.timestamp").exists());
+  }
+
+  @Test
   @DisplayName("CustomException(5xx)이 발생하면 500 SERVER_ERROR를 반환한다")
   void handleCustomExceptionServerError() throws Exception {
     mockMvc
@@ -192,6 +203,11 @@ class TestController {
   @GetMapping("/test/custom-exception")
   public void triggerCustomException() {
     throw new CustomException(GlobalErrorCode.NOT_FOUND);
+  }
+
+  @GetMapping("/test/custom-exception-message")
+  public void triggerCustomExceptionWithMessage() {
+    throw new CustomException(GlobalErrorCode.NOT_FOUND, "ID가 5인 회원을 찾을 수 없습니다.");
   }
 
   @GetMapping("/test/custom-server-error")
