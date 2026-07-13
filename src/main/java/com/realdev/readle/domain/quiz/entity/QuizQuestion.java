@@ -43,7 +43,7 @@ public class QuizQuestion {
   private QuestionType questionType;
 
   @Column(name = "order_no", nullable = false)
-  private short orderNo;
+  private Integer orderNo;
 
   @Lob
   @Column(name = "question_text", nullable = false)

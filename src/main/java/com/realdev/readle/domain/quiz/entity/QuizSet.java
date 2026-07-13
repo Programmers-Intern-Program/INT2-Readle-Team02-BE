@@ -13,7 +13,6 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
@@ -43,7 +42,7 @@ public class QuizSet extends BaseCreatedAtEntity {
   private QuizSetStatus status;
 
   @Column(name = "question_count")
-  private Short questionCount;
+  private Integer questionCount;
 
   @Column(name = "completed_at")
   private LocalDateTime completedAt;
@@ -51,7 +50,7 @@ public class QuizSet extends BaseCreatedAtEntity {
   @Column(name = "is_bypassed", nullable = false)
   private boolean bypassed;
 
-  @OneToOne(fetch = FetchType.LAZY)
+  @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(name = "source_validation_id", nullable = false)
   private ContentValidation sourceValidation;
 
@@ -68,16 +67,22 @@ public class QuizSet extends BaseCreatedAtEntity {
   }
 
   public void complete(int questionCount) {
+    if (this.status != QuizSetStatus.GENERATING) {
+      throw new IllegalStateException("이미 처리된 퀴즈 세트입니다. 현재 상태: " + this.status);
+    }
     if (questionCount < MIN_QUESTION_COUNT || questionCount > MAX_QUESTION_COUNT) {
       throw new IllegalArgumentException(
           "퀴즈 문항 수는 " + MIN_QUESTION_COUNT + "개에서 " + MAX_QUESTION_COUNT + "개 사이여야 합니다.");
     }
     this.status = QuizSetStatus.COMPLETED;
-    this.questionCount = (short) questionCount;
+    this.questionCount = questionCount;
     this.completedAt = LocalDateTime.now();
   }
 
   public void fail() {
+    if (this.status != QuizSetStatus.GENERATING) {
+      throw new IllegalStateException("이미 처리된 퀴즈 세트입니다. 현재 상태: " + this.status);
+    }
     this.status = QuizSetStatus.FAILED;
     this.completedAt = LocalDateTime.now();
   }

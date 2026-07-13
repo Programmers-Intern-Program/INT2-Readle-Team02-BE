@@ -50,7 +50,7 @@ public class QuizAnswer {
   private QuizChoice submittedChoice;
 
   @Column(name = "is_correct", nullable = false)
-  private boolean correct;
+  private Boolean isCorrect;
 
   @Lob
   @Column(name = "ai_feedback")

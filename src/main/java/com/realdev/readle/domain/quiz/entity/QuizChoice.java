@@ -44,5 +44,5 @@ public class QuizChoice {
   private String choiceText;
 
   @Column(name = "is_correct", nullable = false)
-  private boolean correct;
+  private Boolean isCorrect;
 }
