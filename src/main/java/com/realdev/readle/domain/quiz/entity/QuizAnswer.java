@@ -43,8 +43,8 @@ public class QuizAnswer extends BaseTimeEntity {
   private QuizQuestion quizQuestion;
 
   @Lob
-  @Column(name = "user_answer", columnDefinition = "TEXT")
-  private String userAnswer;
+  @Column(name = "submitted_answer_text", columnDefinition = "TEXT")
+  private String submittedAnswerText;
 
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(name = "submitted_choice_id")
@@ -63,14 +63,14 @@ public class QuizAnswer extends BaseTimeEntity {
   private QuizAnswer(
       QuizAttempt quizAttempt,
       QuizQuestion quizQuestion,
-      String userAnswer,
+      String submittedAnswerText,
       QuizChoice submittedChoice,
       Boolean isCorrect,
       String aiFeedback,
       LocalDateTime evaluatedAt) {
     this.quizAttempt = quizAttempt;
     this.quizQuestion = quizQuestion;
-    this.userAnswer = userAnswer;
+    this.submittedAnswerText = submittedAnswerText;
     this.submittedChoice = submittedChoice;
     this.isCorrect = isCorrect;
     this.aiFeedback = aiFeedback;
@@ -80,11 +80,17 @@ public class QuizAnswer extends BaseTimeEntity {
   public static QuizAnswer createForWritten(
       QuizAttempt quizAttempt,
       QuizQuestion quizQuestion,
-      String userAnswer,
+      String submittedAnswerText,
       Boolean isCorrect,
       String aiFeedback) {
     return new QuizAnswer(
-        quizAttempt, quizQuestion, userAnswer, null, isCorrect, aiFeedback, LocalDateTime.now());
+        quizAttempt,
+        quizQuestion,
+        submittedAnswerText,
+        null,
+        isCorrect,
+        aiFeedback,
+        LocalDateTime.now());
   }
 
   public static QuizAnswer createForChoice(
