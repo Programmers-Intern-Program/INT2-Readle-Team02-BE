@@ -10,7 +10,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.realdev.readle.global.config.ClaudeConfig;
+import com.realdev.readle.global.config.ClaudeProperties;
+import com.realdev.readle.global.config.ClaudeTestConfig;
 import com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse;
 import java.io.IOException;
 import java.util.Collections;
@@ -19,6 +20,7 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
@@ -31,7 +33,8 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 
 @RestClientTest(ClaudeClient.class)
-@Import(ClaudeConfig.class)
+@Import(ClaudeTestConfig.class)
+@EnableConfigurationProperties(ClaudeProperties.class)
 @TestPropertySource(
     properties = {
       "anthropic.claude.api-key=mock-key",

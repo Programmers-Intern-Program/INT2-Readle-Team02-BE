@@ -1,6 +1,7 @@
 package com.realdev.readle.global.config;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -21,5 +22,5 @@ public class ClaudeProperties {
   @NotBlank(message = "Claude API Base URL은 필수 설정 값입니다.") private String baseUrl;
 
   /** Claude API 응답 최대 토큰 수 (기본값: 4000) */
-  private int maxTokens = 4000;
+  @Positive(message = "최대 토큰 수는 1 이상의 양수여야 합니다.") private int maxTokens = 4000;
 }
