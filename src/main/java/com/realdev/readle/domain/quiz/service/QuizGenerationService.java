@@ -41,21 +41,21 @@ public class QuizGenerationService {
 
   private final TransactionTemplate transactionTemplate;
 
+  @org.springframework.beans.factory.annotation.Autowired
+  @org.springframework.context.annotation.Lazy
+  private QuizGenerationService self;
+
   public QuizCreateResponse createQuizSet(Long sourceValidationId) {
     ContentValidation validation =
         contentValidationRepository
             .findById(sourceValidationId)
             .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
 
-    boolean isBypassedTemp = false;
+    // Validation 상태 분기: PASSED만 허용하는 allow-list로 변경
     if (validation.getStatus() != ValidationStatus.PASSED) {
-      if (validation.getStatus() == ValidationStatus.FAILED
-          || validation.getStatus() == ValidationStatus.PENDING) {
-        throw new ValidationNotPassedException("해당 콘텐츠는 퀴즈 생성이 불가능한 상태입니다.");
-      }
-      isBypassedTemp = true;
+      throw new ValidationNotPassedException("해당 콘텐츠는 퀴즈 생성이 불가능한 상태입니다.");
     }
-    final boolean isBypassed = isBypassedTemp;
+    final boolean isBypassed = false;
 
     // 1. 초기 QuizSet 레코드 생성 및 저장 (Transaction 분리)
     QuizSet quizSet =
@@ -72,9 +72,16 @@ public class QuizGenerationService {
                 }
               }
 
+              // Detached 객체 대신 Managed 객체를 재조회하여 사용
+              ContentValidation managedValidation =
+                  contentValidationRepository
+                      .findById(sourceValidationId)
+                      .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
+
               QuizSet newQuizSet;
               try {
-                newQuizSet = QuizSet.create(validation.getContent(), validation, isBypassed);
+                newQuizSet =
+                    QuizSet.create(managedValidation.getContent(), managedValidation, isBypassed);
                 return quizSetRepository.saveAndFlush(newQuizSet);
               } catch (DataIntegrityViolationException e) {
                 throw new QuizGenerationException("이미 해당 콘텐츠에 대한 퀴즈 생성 요청이 진행 중이거나 완료되었습니다.");
@@ -83,16 +90,8 @@ public class QuizGenerationService {
 
     try {
       // 2. AI Prompt 생성 및 호출 (Non-Transactional)
-      // transactionTemplate으로 조회해 LazyInitializationException 방지
-      String articleText =
-          transactionTemplate.execute(
-              txStatus -> {
-                ContentValidation v =
-                    contentValidationRepository.findById(sourceValidationId).orElseThrow();
-                return v.getContent().getRawText() != null
-                    ? v.getContent().getRawText()
-                    : v.getContent().getExtractedText();
-              });
+      // 전용 readOnly 트랜잭션 메서드를 호출하여 지연 로딩 방지
+      String articleText = self.getArticleText(sourceValidationId);
 
       if (articleText == null || articleText.isBlank()) {
         throw new IllegalArgumentException("퀴즈를 생성할 본문 텍스트가 존재하지 않습니다.");
@@ -101,12 +100,15 @@ public class QuizGenerationService {
       // 방어: </source_content> 인젝션 치환 (대소문자·공백 무관하게 처리)
       articleText = articleText.replaceAll("(?i)</\\s*source_content\\s*>", "< /source_content>");
 
+      boolean hasCode =
+          articleText.contains("{")
+              || articleText.contains("=")
+              || articleText.contains(";")
+              || articleText.contains("public")
+              || articleText.contains("function");
+
       String additionalRule = "";
-      if (!articleText.contains("{")
-          && !articleText.contains("=")
-          && !articleText.contains(";")
-          && !articleText.contains("public")
-          && !articleText.contains("function")) {
+      if (!hasCode) {
         additionalRule = "본문에 코드가 없으므로 code_blank 유형의 문제는 생성하지 마세요.";
       }
 
@@ -129,6 +131,12 @@ public class QuizGenerationService {
                 type = QuestionType.valueOf(quizDto.getType().toUpperCase());
               } catch (IllegalArgumentException e) {
                 throw new QuizGenerationException("알 수 없는 문제 유형입니다: " + quizDto.getType());
+              }
+
+              // 사후 검증: 본문에 코드가 없는데 CODE_BLANK 유형의 문제가 생성된 경우 건너뜀
+              if (!hasCode && type == QuestionType.CODE_BLANK) {
+                log.warn("본문에 코드가 없으므로 CODE_BLANK 유형의 문제를 스킵합니다: {}", quizDto.getQuestion());
+                continue;
               }
 
               // SHORT_ANSWER / CODE_BLANK는 정답이 null이거나 공백이면 거부
@@ -170,7 +178,7 @@ public class QuizGenerationService {
               }
             }
 
-            activeQuizSet.complete(parsedResponse.getQuizzes().size());
+            activeQuizSet.complete(orderNo - 1);
             return QuizCreateResponse.from(activeQuizSet);
           });
 
@@ -219,5 +227,16 @@ public class QuizGenerationService {
     } catch (JsonProcessingException e) {
       throw new QuizGenerationException("AI 응답 JSON 파싱에 실패했습니다.", e);
     }
+  }
+
+  @org.springframework.transaction.annotation.Transactional(readOnly = true)
+  public String getArticleText(Long sourceValidationId) {
+    ContentValidation v =
+        contentValidationRepository
+            .findById(sourceValidationId)
+            .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
+    return v.getContent().getRawText() != null
+        ? v.getContent().getRawText()
+        : v.getContent().getExtractedText();
   }
 }

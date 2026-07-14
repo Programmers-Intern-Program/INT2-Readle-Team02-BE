@@ -65,6 +65,7 @@ class QuizGenerationServiceTest {
 
     member = org.mockito.Mockito.mock(Member.class);
     ReflectionTestUtils.setField(member, "id", 1L);
+    ReflectionTestUtils.setField(quizGenerationService, "self", quizGenerationService);
 
     content = org.mockito.Mockito.mock(Content.class);
     ReflectionTestUtils.setField(content, "id", 1L);
@@ -187,6 +188,10 @@ class QuizGenerationServiceTest {
         .cause()
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("퀴즈를 생성할 본문 텍스트가 존재하지 않습니다.");
+
+    // 예외 보상 상태 전이 검증 (FAILED 상태 전이 확인)
+    assertThat(expectedQuizSet.getStatus())
+        .isEqualTo(com.realdev.readle.domain.quiz.entity.QuizSetStatus.FAILED);
   }
 
   @Test
@@ -287,8 +292,8 @@ class QuizGenerationServiceTest {
   }
 
   @Test
-  @DisplayName("객관식 정답이 2개 이상이면 QuizGenerationException 발생")
-  void createQuizSet_ThrowsWhenMultipleCorrectAnswers() {
+  @DisplayName("객관식 문제의 선택지가 비어있으면 QuizGenerationException 발생")
+  void createQuizSet_ThrowsWhenMultipleChoiceOptionsEmpty() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
     given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
@@ -307,19 +312,31 @@ class QuizGenerationServiceTest {
     given(quizSetRepository.findById(200L)).willReturn(Optional.of(expectedQuizSet));
     given(promptLoader.loadPrompt(anyString(), any())).willReturn("system prompt");
 
-    // options[0]=="0"으로 설정했지만, 두 선택지가 정답이 되도록 플로우 확인
-    // answer=="0"(index 0):선택지 0번 -> 정답 1개이지만,
-    // 이번 테스트는 answer에 여러 값 저장 시나리오 아니라
-    // answer=="-1"으로 직접 테스트하는 것이 더 안정적이지만
-    // 여기서는 '99' 서비스가 answer=0으로 두 선택지 모두 정답 세팅 불가 -> 종료
-    // 대신, answer값을 중복 인덱스로 마크하는 코드도로 실제로 제가하려면
-    // 정답 선택지 2개 시나리오 직접 재현은 현재 로직상 불가(인덱스 1개)
-    // => isCorrect 로직 설명 보산: answer == choiceOrderNo-1 비교므로
-    // 실제로 "0"==0 && "0"==1 늘 둔 만족하는 케이스는 다른 제약으로 적용
-    // => 이 테스트는 과거 툱업 및 지속적 보완에서는 skip-valid 처리 (skip)
-    // => 대신 실제 다중정답은 다른 구조이므로, 이 테스틈를 주말 버리고
-    // zero-correct 테스트를 이미 덕보여주는 것으로 대체되므로 SKIP
-    org.junit.jupiter.api.Assumptions.abort("다중 인덱스 시나리오는 현재 answer 로직 단일 인덱스 비교로 재현 불가");
+    // options를 empty array로 제공
+    String claudeJsonResponse =
+        """
+            {
+              "tags": ["Test"],
+              "quizzes": [
+                {
+                  "id": 1,
+                  "type": "multiple_choice",
+                  "question": "Q?",
+                  "options": [],
+                  "code_snippet": null,
+                  "answer": "0"
+                }
+              ]
+            }
+            """;
+    given(claudeClient.getGeneratedText(anyString(), anyString())).willReturn(claudeJsonResponse);
+
+    // when & then
+    assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
+        .isInstanceOf(QuizGenerationException.class)
+        .hasMessageContaining("오류가 발생했습니다")
+        .cause()
+        .hasMessageContaining("객관식 문제에 선택지가 없습니다");
   }
 
   @Test
