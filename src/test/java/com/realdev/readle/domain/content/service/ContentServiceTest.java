@@ -241,6 +241,34 @@ class ContentServiceTest {
     assertThat(response.validationStatus()).isEqualTo(ValidationStatus.PENDING);
   }
 
+  @Test
+  @DisplayName("inputType=URL이고 url이 null이면 400 INVALID_INPUT 예외가 발생한다")
+  void createContent_urlType_nullUrl_throwsInvalidInput() {
+    UUID memberUuid = UUID.randomUUID();
+    ContentCreateRequest request = new ContentCreateRequest(InputType.URL, "제목", null, null, null);
+
+    assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.URL_REQUIRED);
+
+    verify(memberRepository, never()).findByUuid(any());
+  }
+
+  @Test
+  @DisplayName("inputType=TEXT이고 text가 null이면 400 INVALID_INPUT 예외가 발생한다")
+  void createContent_textType_nullText_throwsInvalidInput() {
+    UUID memberUuid = UUID.randomUUID();
+    ContentCreateRequest request = new ContentCreateRequest(InputType.TEXT, "제목", null, null, null);
+
+    assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.TEXT_REQUIRED);
+
+    verify(memberRepository, never()).findByUuid(any());
+  }
+
   private final ArgumentCaptor<Content> contentCaptor = ArgumentCaptor.forClass(Content.class);
 
   private Member mockMember() {

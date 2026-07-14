@@ -43,20 +43,28 @@ public class ContentService {
       throw new CustomException(GlobalErrorCode.UNAUTHORIZED);
     }
 
-    // 2. Fast Fail: 텍스트 길이 제한
+    // 2. Cross-field 검증 (Fast Fail)
+    if (request.inputType() == InputType.URL
+        && (request.url() == null || request.url().isBlank())) {
+      throw new CustomException(ContentErrorCode.URL_REQUIRED);
+    }
     if (request.inputType() == InputType.TEXT
-        && request.text() != null
-        && request.text().length() > MAX_TEXT_LENGTH) {
+        && (request.text() == null || request.text().isBlank())) {
+      throw new CustomException(ContentErrorCode.TEXT_REQUIRED);
+    }
+
+    // 3. Fast Fail: 텍스트 길이 제한
+    if (request.inputType() == InputType.TEXT && request.text().length() > MAX_TEXT_LENGTH) {
       throw new CustomException(ContentErrorCode.CONTENT_TOO_LARGE);
     }
 
-    // 3. 인증된 회원 조회
+    // 4. 인증된 회원 조회
     Member member =
         memberRepository
             .findByUuid(memberUuid.toString())
             .orElseThrow(() -> new CustomException(MemberErrorCode.MEMBER_NOT_FOUND));
 
-    // 4. inputType 분기 및 저장
+    // 5. inputType 분기 및 저장
     Content content = buildContent(request, member);
     Content saved = contentRepository.save(content);
 
