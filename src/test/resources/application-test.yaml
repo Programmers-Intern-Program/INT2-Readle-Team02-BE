@@ -10,10 +10,6 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.H2Dialect
-
   flyway:
     enabled: true
 
@@ -36,3 +32,14 @@ anthropic:
     base-url: https://api.anthropic.com
     model: claude-sonnet-5
     version: 2023-06-01
+
+security:
+  jwt-issuer: readle-test
+  jwt-secret: 01234567890123456789012345678901
+  jwt-audience: readle-api
+  access-token-minutes: 30
+  refresh-token-days: 14
+  state-encryption-key: 01234567890123456789012345678901
+  state-minutes: 10
+  backend-origin: http://localhost:8080
+  allowed-return-paths: /
