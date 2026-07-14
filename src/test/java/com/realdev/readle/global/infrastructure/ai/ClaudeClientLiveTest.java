@@ -78,6 +78,10 @@ class ClaudeClientLiveTest {
             .defaultHeader("anthropic-version", "2023-06-01")
             .defaultHeader("content-type", MediaType.APPLICATION_JSON_VALUE)
             .build();
+
+    // API Key가 누락된 CI/CD 환경에서 빌드가 깨지지 않도록 테스트 스킵(Skip) 가드 추가
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        apiKey != null && !apiKey.isBlank(), "CLAUDE_API_KEY가 존재하지 않으므로 라이브 실거래 테스트를 스킵합니다.");
   }
 
   @Test
