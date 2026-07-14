@@ -11,7 +11,11 @@ class SecurityPropertiesTest {
   void rejectsMissingOrShortSecurityKeys() {
     assertThatThrownBy(() -> properties("", validStateKey()))
         .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> properties(null, validStateKey()))
+        .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> properties(validJwtSecret(), "short"))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> properties(validJwtSecret(), null))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
