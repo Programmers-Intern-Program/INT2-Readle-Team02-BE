@@ -63,13 +63,6 @@ class ClaudeClientLiveTest {
       apiKey = System.getenv("CLAUDE_API_KEY").replaceAll("[\\r\\n\\t\\s]", "");
     }
 
-    System.err.println("==================================================");
-    System.err.println("[DEBUG] Loaded API Key Length: " + (apiKey != null ? apiKey.length() : 0));
-    System.err.println(
-        "[DEBUG] Loaded API Key Prefix: "
-            + (apiKey != null && apiKey.length() > 15 ? apiKey.substring(0, 15) : "none"));
-    System.err.println("==================================================");
-
     rawRestClient =
         RestClient.builder()
             .requestFactory(new JdkClientHttpRequestFactory())

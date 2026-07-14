@@ -1,13 +1,17 @@
 package com.realdev.readle.global.infrastructure.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.realdev.readle.global.config.ClaudeConfig;
+import com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -16,9 +20,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClientException;
 
 @RestClientTest(ClaudeClient.class)
 @Import(ClaudeConfig.class)
@@ -67,6 +73,99 @@ class ClaudeClientTest {
 
     // then
     assertThat(generatedText).isEqualTo("Generated Quiz JSON text");
+    server.verify();
+  }
+
+  @Test
+  @DisplayName(
+      "Claude API 응답의 content 목록이 비어있으면 getGeneratedText 호출 시 IllegalStateException을 던져야 한다")
+  void getGeneratedTextThrowsExceptionOnEmptyResponse() throws Exception {
+    // given
+    String systemPrompt = "You are a quiz master";
+    String userPrompt = "Generate quiz";
+
+    Map<String, Object> mockResponseMap =
+        Map.of(
+            "id", "msg_12345",
+            "type", "message",
+            "role", "assistant",
+            "content", Collections.emptyList(),
+            "model", "claude-sonnet-5",
+            "usage", Map.of("input_tokens", 100, "output_tokens", 200));
+    String responseJson = objectMapper.writeValueAsString(mockResponseMap);
+
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+    // when & then
+    assertThatThrownBy(() -> claudeClient.getGeneratedText(systemPrompt, userPrompt))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("Claude API로부터 비어있는 응답을 받았습니다.");
+    server.verify();
+  }
+
+  @Test
+  @DisplayName("Claude API 최초 호출 시 5xx 에러가 발생하면 1회 재시도하여 성공적인 응답을 반환해야 한다")
+  void generateMessageFailsAndRetriesOnApiException() throws Exception {
+    // given
+    String systemPrompt = "You are a quiz master";
+    String userPrompt = "Generate quiz";
+
+    Map<String, Object> mockResponseMap =
+        Map.of(
+            "id", "msg_12345",
+            "type", "message",
+            "role", "assistant",
+            "content", List.of(Map.of("type", "text", "text", "Generated Quiz JSON text")),
+            "model", "claude-sonnet-5",
+            "usage", Map.of("input_tokens", 100, "output_tokens", 200));
+    String responseJson = objectMapper.writeValueAsString(mockResponseMap);
+
+    // 1차 시도: 500 에러 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+
+    // 2차 시도 (재시도): 200 성공 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+    // when
+    ClaudeResponse response = claudeClient.generateMessage(systemPrompt, userPrompt);
+
+    // then
+    assertThat(response).isNotNull();
+    assertThat(response.getContent().get(0).getText()).isEqualTo("Generated Quiz JSON text");
+    server.verify();
+  }
+
+  @Test
+  @DisplayName("Claude API 호출 시 1차 및 재시도 모두 실패하면 최종적으로 RestClientException을 전파해야 한다")
+  void generateMessageThrowsExceptionAfterRetryFailure() {
+    // given
+    String systemPrompt = "You are a quiz master";
+    String userPrompt = "Generate quiz";
+
+    // 1차 시도: 500 에러 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+
+    // 2차 시도 (재시도): 500 에러 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+
+    // when & then
+    assertThatThrownBy(() -> claudeClient.generateMessage(systemPrompt, userPrompt))
+        .isInstanceOf(RestClientException.class);
     server.verify();
   }
 }

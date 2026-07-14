@@ -1,16 +1,22 @@
 package com.realdev.readle.global.config;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 @Getter
 @Setter
+@Validated
 @ConfigurationProperties(prefix = "anthropic.claude")
 public class ClaudeProperties {
 
-  private String apiKey;
-  private String version;
-  private String model;
-  private String baseUrl;
+  @NotBlank(message = "Claude API Key는 필수 설정 값입니다.") private String apiKey;
+
+  @NotBlank(message = "Claude API 버전은 필수 설정 값입니다.") private String version;
+
+  @NotBlank(message = "Claude 디폴트 모델명은 필수 설정 값입니다.") private String model;
+
+  @NotBlank(message = "Claude API Base URL은 필수 설정 값입니다.") private String baseUrl;
 }
