@@ -2,14 +2,21 @@ package com.realdev.readle.global.util.crawler;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import com.realdev.readle.domain.content.exception.ContentErrorCode;
 import com.realdev.readle.global.exception.CustomException;
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -154,7 +161,9 @@ class WebCrawlerTest {
   @DisplayName("잘못된 URL 요청 시 CustomException 예외가 전파된다")
   void invalidUrlException() {
     assertThatThrownBy(() -> webCrawler.crawl("invalid-url-scheme"))
-        .isInstanceOf(CustomException.class);
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
   }
 
   @Test
@@ -190,5 +199,332 @@ class WebCrawlerTest {
     service.shutdown();
 
     assertThat(successCount.get()).isEqualTo(numberOfThreads);
+  }
+
+  @Test
+  @DisplayName("SSRF 공격 시도(루프백, 사설IP, 링크로컬 대역) 발생 시 CustomException 예외가 전파된다")
+  void ssrfBlockException() {
+    // 127.0.0.1 대역 차단 검증
+    assertThatThrownBy(() -> webCrawler.crawl("http://127.0.0.1:8080/admin"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+
+    // 192.168.x.x 사설 대역 차단 검증
+    assertThatThrownBy(() -> webCrawler.crawl("http://192.168.0.1/status"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+
+    // AWS 인스턴스 메타데이터 API 대역 차단 검증
+    assertThatThrownBy(() -> webCrawler.crawl("http://169.254.169.254/latest/meta-data"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+
+    // IPv4-Mapped IPv6 루프백 차단 검증
+    assertThatThrownBy(() -> webCrawler.crawl("http://[::ffff:127.0.0.1]/status"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+
+    // IPv4-Mapped IPv6 사설망 차단 검증
+    assertThatThrownBy(() -> webCrawler.crawl("http://[::ffff:192.168.0.1]/status"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+  }
+
+  @Test
+  @DisplayName("공개 URL에서 사설 IP로의 리다이렉트 발생 시 CustomException(INVALID_URL)이 발생한다")
+  void redirectToPrivateIpThrowsInvalidUrl() throws IOException {
+    HttpURLConnection mockConn = mock(HttpURLConnection.class);
+    when(mockConn.getResponseCode()).thenReturn(302);
+    when(mockConn.getHeaderField("Location")).thenReturn("http://192.168.0.1/status");
+
+    WebCrawler testCrawler =
+        new WebCrawler() {
+          @Override
+          @NonNull HttpURLConnection getHttpURLConnection(
+              String currentUrl, String host, InetAddress safeAddress) {
+            return mockConn;
+          }
+
+          @Override
+          InetAddress validateAndSelectSafeAddress(String host) {
+            if ("public-site.com".equals(host)) {
+              InetAddress mockAddr = mock(InetAddress.class);
+              when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+              return mockAddr;
+            }
+            return super.validateAndSelectSafeAddress(host);
+          }
+        };
+
+    assertThatThrownBy(() -> testCrawler.crawl("https://public-site.com"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+  }
+
+  @Test
+  @DisplayName("상대 경로 리다이렉트 시 절대 경로로 복원하여 정상적으로 파싱한다")
+  void relativeRedirectResolvesCorrectly() throws IOException {
+    HttpURLConnection firstConn = mock(HttpURLConnection.class);
+    when(firstConn.getResponseCode()).thenReturn(302);
+    when(firstConn.getHeaderField("Location")).thenReturn("/relative-path");
+
+    HttpURLConnection secondConn = mock(HttpURLConnection.class);
+    when(secondConn.getResponseCode()).thenReturn(200);
+    byte[] mockHtml = "<html><head><title>성공</title></head><body>본문</body></html>".getBytes();
+    when(secondConn.getInputStream()).thenReturn(new java.io.ByteArrayInputStream(mockHtml));
+
+    WebCrawler testCrawler =
+        new WebCrawler() {
+          private int callCount = 0;
+
+          @Override
+          @NonNull HttpURLConnection getHttpURLConnection(
+              String currentUrl, String host, InetAddress safeAddress) {
+            callCount++;
+            if (callCount == 1) {
+              return firstConn;
+            } else {
+              return secondConn;
+            }
+          }
+
+          @Override
+          InetAddress validateAndSelectSafeAddress(String host) {
+            if ("public-site.com".equals(host)) {
+              InetAddress mockAddr = mock(InetAddress.class);
+              when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+              return mockAddr;
+            }
+            return super.validateAndSelectSafeAddress(host);
+          }
+        };
+
+    WebCrawler.CrawledDocument result = testCrawler.crawl("https://public-site.com");
+    assertThat(result.title()).isEqualTo("성공");
+  }
+
+  @Test
+  @DisplayName("리다이렉트 횟수가 최대 제한(3회)을 초과하면 CustomException(EXTRACT_FAILED)이 발생한다")
+  void redirectCountExceededThrowsExtractFailed() throws IOException {
+    HttpURLConnection mockConn = mock(HttpURLConnection.class);
+    when(mockConn.getResponseCode()).thenReturn(302);
+    when(mockConn.getHeaderField("Location")).thenReturn("https://public-site.com/redirect");
+
+    WebCrawler testCrawler =
+        new WebCrawler() {
+          @Override
+          @NonNull HttpURLConnection getHttpURLConnection(
+              String currentUrl, String host, InetAddress safeAddress) {
+            return mockConn;
+          }
+
+          @Override
+          InetAddress validateAndSelectSafeAddress(String host) {
+            if ("public-site.com".equals(host)) {
+              InetAddress mockAddr = mock(InetAddress.class);
+              when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+              return mockAddr;
+            }
+            return super.validateAndSelectSafeAddress(host);
+          }
+        };
+
+    assertThatThrownBy(() -> testCrawler.crawl("https://public-site.com"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.EXTRACT_FAILED);
+  }
+
+  @Test
+  @DisplayName("리다이렉트 대상 주소(Location)가 비어있으면 CustomException(EXTRACT_FAILED)이 발생한다")
+  void emptyRedirectLocationThrowsExtractFailed() throws IOException {
+    HttpURLConnection mockConn = mock(HttpURLConnection.class);
+    when(mockConn.getResponseCode()).thenReturn(302);
+    when(mockConn.getHeaderField("Location")).thenReturn("   ");
+
+    WebCrawler testCrawler =
+        new WebCrawler() {
+          @Override
+          @NonNull HttpURLConnection getHttpURLConnection(
+              String currentUrl, String host, InetAddress safeAddress) {
+            return mockConn;
+          }
+
+          @Override
+          InetAddress validateAndSelectSafeAddress(String host) {
+            if ("public-site.com".equals(host)) {
+              InetAddress mockAddr = mock(InetAddress.class);
+              when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+              return mockAddr;
+            }
+            return super.validateAndSelectSafeAddress(host);
+          }
+        };
+
+    assertThatThrownBy(() -> testCrawler.crawl("https://public-site.com"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.EXTRACT_FAILED);
+  }
+
+  @Test
+  @DisplayName("BoundedInputStream: 지정된 바이트 크기를 초과하여 읽으려 하면 IOException이 발생한다")
+  void boundedInputStreamThrowsOnLimitExceeded() {
+    byte[] data = "123456".getBytes();
+    java.io.ByteArrayInputStream bis = new java.io.ByteArrayInputStream(data);
+    WebCrawler.BoundedInputStream boundedIs = new WebCrawler.BoundedInputStream(bis, 5);
+
+    assertThatThrownBy(
+            () -> {
+              byte[] buffer = new byte[10];
+              boundedIs.read(buffer);
+            })
+        .isInstanceOf(java.io.IOException.class)
+        .hasMessageContaining("본문 크기가 제한을 초과했습니다");
+  }
+
+  @Test
+  @DisplayName("BoundedInputStream: 지정된 바이트 크기 이하의 데이터는 정상적으로 모두 읽을 수 있다")
+  void boundedInputStreamReadsNormalData() throws java.io.IOException {
+    byte[] data = "12345".getBytes();
+    java.io.ByteArrayInputStream bis = new java.io.ByteArrayInputStream(data);
+    WebCrawler.BoundedInputStream boundedIs = new WebCrawler.BoundedInputStream(bis, 5);
+
+    byte[] buffer = new byte[10];
+    int bytesRead = boundedIs.read(buffer);
+
+    assertThat(bytesRead).isEqualTo(5);
+    assertThat(new String(buffer, 0, bytesRead)).isEqualTo("12345");
+    assertThat(boundedIs.read()).isEqualTo(-1); // EOF
+  }
+
+  @Test
+  @DisplayName("HTTP 또는 HTTPS가 아닌 프로토콜 스킴(예: ftp, file) 요청 시 CustomException(INVALID_URL)이 발생한다")
+  void nonHttpSchemeThrowsInvalidUrl() {
+    assertThatThrownBy(() -> webCrawler.crawl("ftp://example.com/file"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+
+    assertThatThrownBy(() -> webCrawler.crawl("file:///etc/passwd"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+  }
+
+  @Test
+  @DisplayName("리다이렉트 타겟 프로토콜 스킴이 HTTP 또는 HTTPS가 아닌 경우 CustomException(INVALID_URL)이 발생한다")
+  void redirectNonHttpSchemeThrowsInvalidUrl() throws IOException {
+    HttpURLConnection mockConn = mock(HttpURLConnection.class);
+    when(mockConn.getResponseCode()).thenReturn(302);
+    when(mockConn.getHeaderField("Location")).thenReturn("ftp://example.com/file");
+
+    WebCrawler testCrawler =
+        new WebCrawler() {
+          @Override
+          @NonNull HttpURLConnection getHttpURLConnection(
+              String currentUrl, String host, InetAddress safeAddress) {
+            return mockConn;
+          }
+
+          @Override
+          InetAddress validateAndSelectSafeAddress(String host) {
+            if ("public-site.com".equals(host)) {
+              InetAddress mockAddr = mock(InetAddress.class);
+              when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+              return mockAddr;
+            }
+            return super.validateAndSelectSafeAddress(host);
+          }
+        };
+
+    assertThatThrownBy(() -> testCrawler.crawl("https://public-site.com"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+  }
+
+  @Test
+  @DisplayName("getHttpURLConnection: 비표준 포트가 포함된 URL 요청 시 Host 헤더에 포트 번호가 포함된다")
+  void hostHeaderIncludesNonStandardPort() throws IOException {
+    System.setProperty("sun.net.http.allowRestrictedHeaders", "true");
+    try {
+      WebCrawler crawler = new WebCrawler();
+      InetAddress mockAddr = mock(InetAddress.class);
+      when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+
+      // 1. 비표준 포트 (8080)
+      HttpURLConnection conn1 =
+          crawler.getHttpURLConnection("http://example.com:8080/path", "example.com", mockAddr);
+      assertThat(conn1.getRequestProperty("Host")).isEqualTo("example.com:8080");
+
+      // 2. 표준 포트 (80)
+      HttpURLConnection conn2 =
+          crawler.getHttpURLConnection("http://example.com:80/path", "example.com", mockAddr);
+      assertThat(conn2.getRequestProperty("Host")).isEqualTo("example.com");
+
+      // 3. 포트 생략
+      HttpURLConnection conn3 =
+          crawler.getHttpURLConnection("http://example.com/path", "example.com", mockAddr);
+      assertThat(conn3.getRequestProperty("Host")).isEqualTo("example.com");
+    } finally {
+      System.clearProperty("sun.net.http.allowRestrictedHeaders");
+    }
+  }
+
+  @Test
+  @DisplayName("리다이렉트 대상 주소의 대소문자(경로 및 파라미터)가 훼손되지 않고 보존된다")
+  void redirectPreservesCaseOfPathAndParameters() throws IOException {
+    HttpURLConnection firstConn = mock(HttpURLConnection.class);
+    when(firstConn.getResponseCode()).thenReturn(302);
+    // 대소문자가 혼용된 상대 경로 설정
+    when(firstConn.getHeaderField("Location")).thenReturn("/Relative-Path?Token=AbCdEf");
+
+    HttpURLConnection secondConn = mock(HttpURLConnection.class);
+    when(secondConn.getResponseCode()).thenReturn(200);
+    byte[] mockHtml = "<html><head><title>성공</title></head><body>본문</body></html>".getBytes();
+    when(secondConn.getInputStream()).thenReturn(new java.io.ByteArrayInputStream(mockHtml));
+
+    java.util.List<String> requestedUrls = new java.util.ArrayList<>();
+
+    WebCrawler testCrawler =
+        new WebCrawler() {
+          private int callCount = 0;
+
+          @Override
+          HttpURLConnection getHttpURLConnection(
+              String currentUrl, String host, InetAddress safeAddress) {
+            requestedUrls.add(currentUrl);
+            callCount++;
+            if (callCount == 1) {
+              return firstConn;
+            } else {
+              return secondConn;
+            }
+          }
+
+          @Override
+          InetAddress validateAndSelectSafeAddress(String host) {
+            if ("public-site.com".equals(host)) {
+              InetAddress mockAddr = mock(InetAddress.class);
+              when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+              return mockAddr;
+            }
+            return super.validateAndSelectSafeAddress(host);
+          }
+        };
+
+    testCrawler.crawl("https://public-site.com");
+
+    // 두 번째 요청(리다이렉트 대상)의 URL에 대소문자가 정확히 유지되었는지 검증
+    assertThat(requestedUrls).hasSize(2);
+    assertThat(requestedUrls.get(1))
+        .isEqualTo("https://public-site.com/Relative-Path?Token=AbCdEf");
   }
 }
