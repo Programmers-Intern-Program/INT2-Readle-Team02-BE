@@ -34,6 +34,12 @@ class SecurityPropertiesTest {
   @Test
   void acceptsNonDefaultTokenAndStateTtlsWithinAllowedRanges() {
     properties(validJwtSecret(), validStateKey(), 15, 7, 5);
+    properties(validJwtSecret(), validStateKey(), 1, 14, 5);
+    properties(validJwtSecret(), validStateKey(), 60, 14, 5);
+    properties(validJwtSecret(), validStateKey(), 30, 1, 5);
+    properties(validJwtSecret(), validStateKey(), 30, 30, 5);
+    properties(validJwtSecret(), validStateKey(), 30, 14, 1);
+    properties(validJwtSecret(), validStateKey(), 30, 14, 10);
   }
 
   private SecurityProperties properties(String jwtSecret, String stateEncryptionKey) {
