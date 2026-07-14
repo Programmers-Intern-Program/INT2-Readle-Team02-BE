@@ -79,7 +79,7 @@ public class ClaudeClient {
     ClaudeRequest request =
         ClaudeRequest.builder()
             .model(model)
-            .maxTokens(4000)
+            .maxTokens(properties.getMaxTokens())
             .system(systemPrompt)
             .messages(
                 List.of(ClaudeRequest.Message.builder().role("user").content(userPrompt).build()))

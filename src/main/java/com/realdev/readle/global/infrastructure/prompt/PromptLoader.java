@@ -30,6 +30,11 @@ public class PromptLoader {
   }
 
   private String readTemplate(String promptFileName) {
+    // 경로 순회(path traversal) 및 허용되지 않은 파일명 방지: 영숫자·하이픈과 .txt 확장자만 허용
+    if (promptFileName == null || !promptFileName.matches("[a-zA-Z0-9\\-]+\\.txt")) {
+      throw new IllegalArgumentException(
+          "유효하지 않은 프롬프트 파일명입니다. 영숫자·하이픈과 .txt 확장자만 허용됩니다: " + promptFileName);
+    }
     String resourcePath = "classpath:prompts/" + promptFileName;
     Resource resource = resourceLoader.getResource(resourcePath);
 

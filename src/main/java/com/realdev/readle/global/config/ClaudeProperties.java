@@ -19,4 +19,7 @@ public class ClaudeProperties {
   @NotBlank(message = "Claude 디폴트 모델명은 필수 설정 값입니다.") private String model;
 
   @NotBlank(message = "Claude API Base URL은 필수 설정 값입니다.") private String baseUrl;
+
+  /** Claude API 응답 최대 토큰 수 (기본값: 4000) */
+  private int maxTokens = 4000;
 }

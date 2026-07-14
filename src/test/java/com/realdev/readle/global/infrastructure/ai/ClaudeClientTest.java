@@ -249,4 +249,66 @@ class ClaudeClientTest {
         .isInstanceOf(HttpClientErrorException.class);
     server.verify();
   }
+
+  @Test
+  @DisplayName("Claude API 최초 호출 시 429 응답이 발생하면 1회 재시도하여 성공적인 응답을 반환해야 한다")
+  void generateMessageRetriesOn429TooManyRequests() throws Exception {
+    // given
+    String systemPrompt = "You are a quiz master";
+    String userPrompt = "Generate quiz";
+    String responseJson = mockResponseJson("Generated Quiz JSON text");
+
+    // 1차 시도: 429 Too Many Requests 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+
+    // 2차 시도 (재시도): 200 성공 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+    // when
+    ClaudeResponse response = claudeClient.generateMessage(systemPrompt, userPrompt);
+
+    // then
+    assertThat(response).isNotNull();
+    assertThat(response.getContent().get(0).getText()).isEqualTo("Generated Quiz JSON text");
+    server.verify();
+  }
+
+  @Test
+  @DisplayName("Claude API 호출 시 I/O 연결 장애로 1차 및 재시도 모두 실패하면 최종적으로 예외를 전파해야 한다")
+  void generateMessageThrowsExceptionAfterResourceAccessExhaustingRetry() {
+    // given
+    String systemPrompt = "You are a quiz master";
+    String userPrompt = "Generate quiz";
+
+    // 1차 시도: I/O 연결 장애 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(
+            request -> {
+              throw new ResourceAccessException(
+                  "Connection refused", new IOException("Connection refused"));
+            });
+
+    // 2차 시도 (재시도): I/O 연결 장애 모킹
+    server
+        .expect(requestTo("https://api.anthropic.com/v1/messages"))
+        .andExpect(method(HttpMethod.POST))
+        .andRespond(
+            request -> {
+              throw new ResourceAccessException(
+                  "Connection refused", new IOException("Connection refused"));
+            });
+
+    // when & then
+    assertThatThrownBy(() -> claudeClient.generateMessage(systemPrompt, userPrompt))
+        .isInstanceOf(ResourceAccessException.class);
+    server.verify();
+  }
 }
