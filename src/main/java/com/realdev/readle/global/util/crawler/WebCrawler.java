@@ -150,7 +150,10 @@ public class WebCrawler {
     conn.setReadTimeout(TIMEOUT_MS);
     conn.setInstanceFollowRedirects(false); // 리다이렉트 경로 SSRF 재검증을 위해 자동 이동 금지
     conn.setRequestProperty("User-Agent", USER_AGENT);
-    conn.setRequestProperty("Host", host); // HTTP 가상 호스트 라우팅 보존
+    int port = parsedUrl.getPort();
+    String hostHeader =
+        (port != -1 && port != parsedUrl.getDefaultPort()) ? host + ":" + port : host;
+    conn.setRequestProperty("Host", hostHeader); // HTTP 가상 호스트 라우팅 보존
     conn.setRequestProperty(
         "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp, */*;q=0.8");
     conn.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7");

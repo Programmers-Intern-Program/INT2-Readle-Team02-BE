@@ -437,4 +437,32 @@ class WebCrawlerTest {
         .extracting("errorCode")
         .isEqualTo(ContentErrorCode.INVALID_URL);
   }
+
+  @Test
+  @DisplayName("getHttpURLConnection: 비표준 포트가 포함된 URL 요청 시 Host 헤더에 포트 번호가 포함된다")
+  void hostHeaderIncludesNonStandardPort() throws IOException {
+    System.setProperty("sun.net.http.allowRestrictedHeaders", "true");
+    try {
+      WebCrawler crawler = new WebCrawler();
+      InetAddress mockAddr = mock(InetAddress.class);
+      when(mockAddr.getHostAddress()).thenReturn("8.8.8.8");
+
+      // 1. 비표준 포트 (8080)
+      HttpURLConnection conn1 =
+          crawler.getHttpURLConnection("http://example.com:8080/path", "example.com", mockAddr);
+      assertThat(conn1.getRequestProperty("Host")).isEqualTo("example.com:8080");
+
+      // 2. 표준 포트 (80)
+      HttpURLConnection conn2 =
+          crawler.getHttpURLConnection("http://example.com:80/path", "example.com", mockAddr);
+      assertThat(conn2.getRequestProperty("Host")).isEqualTo("example.com");
+
+      // 3. 포트 생략
+      HttpURLConnection conn3 =
+          crawler.getHttpURLConnection("http://example.com/path", "example.com", mockAddr);
+      assertThat(conn3.getRequestProperty("Host")).isEqualTo("example.com");
+    } finally {
+      System.clearProperty("sun.net.http.allowRestrictedHeaders");
+    }
+  }
 }
