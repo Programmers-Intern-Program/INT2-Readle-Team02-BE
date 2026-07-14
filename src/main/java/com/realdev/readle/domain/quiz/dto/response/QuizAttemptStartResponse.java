@@ -1,4 +1,4 @@
-package com.realdev.readle.domain.quiz.dto;
+package com.realdev.readle.domain.quiz.dto.response;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

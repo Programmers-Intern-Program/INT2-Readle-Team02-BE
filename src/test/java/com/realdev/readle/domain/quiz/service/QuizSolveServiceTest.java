@@ -11,8 +11,8 @@ import static org.mockito.Mockito.verify;
 
 import com.realdev.readle.domain.member.entity.Member;
 import com.realdev.readle.domain.member.repository.MemberRepository;
-import com.realdev.readle.domain.quiz.dto.QuizSubmitRequest;
-import com.realdev.readle.domain.quiz.dto.QuizSubmitResponse;
+import com.realdev.readle.domain.quiz.dto.request.QuizSubmitRequest;
+import com.realdev.readle.domain.quiz.dto.response.QuizSubmitResponse;
 import com.realdev.readle.domain.quiz.entity.AttemptStatus;
 import com.realdev.readle.domain.quiz.entity.QuestionType;
 import com.realdev.readle.domain.quiz.entity.QuizAnswer;
@@ -21,12 +21,14 @@ import com.realdev.readle.domain.quiz.entity.QuizChoice;
 import com.realdev.readle.domain.quiz.entity.QuizQuestion;
 import com.realdev.readle.domain.quiz.entity.QuizResult;
 import com.realdev.readle.domain.quiz.entity.QuizSet;
+import com.realdev.readle.domain.quiz.exception.QuizErrorCode;
 import com.realdev.readle.domain.quiz.repository.QuizAnswerRepository;
 import com.realdev.readle.domain.quiz.repository.QuizAttemptRepository;
 import com.realdev.readle.domain.quiz.repository.QuizChoiceRepository;
 import com.realdev.readle.domain.quiz.repository.QuizQuestionRepository;
 import com.realdev.readle.domain.quiz.repository.QuizResultRepository;
 import com.realdev.readle.domain.quiz.repository.QuizSetRepository;
+import com.realdev.readle.global.exception.CustomException;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -159,7 +161,8 @@ class QuizSolveServiceTest {
     ReflectionTestUtils.setField(request, "answers", List.of(ans1));
 
     assertThatThrownBy(() -> quizSolveService.submitAnswers(200L, "test-uuid", request))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("답안의 개수가 퀴즈 세트의 문제 개수와 일치하지 않습니다");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.INVALID_ANSWER_COUNT);
   }
 }

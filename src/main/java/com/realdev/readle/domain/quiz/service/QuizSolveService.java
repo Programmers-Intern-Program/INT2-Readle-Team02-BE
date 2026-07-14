@@ -2,9 +2,9 @@ package com.realdev.readle.domain.quiz.service;
 
 import com.realdev.readle.domain.member.entity.Member;
 import com.realdev.readle.domain.member.repository.MemberRepository;
-import com.realdev.readle.domain.quiz.dto.QuizDetailResponse;
-import com.realdev.readle.domain.quiz.dto.QuizSubmitRequest;
-import com.realdev.readle.domain.quiz.dto.QuizSubmitResponse;
+import com.realdev.readle.domain.quiz.dto.request.QuizSubmitRequest;
+import com.realdev.readle.domain.quiz.dto.response.QuizDetailResponse;
+import com.realdev.readle.domain.quiz.dto.response.QuizSubmitResponse;
 import com.realdev.readle.domain.quiz.entity.QuestionType;
 import com.realdev.readle.domain.quiz.entity.QuizAnswer;
 import com.realdev.readle.domain.quiz.entity.QuizAttempt;
@@ -12,6 +12,7 @@ import com.realdev.readle.domain.quiz.entity.QuizChoice;
 import com.realdev.readle.domain.quiz.entity.QuizQuestion;
 import com.realdev.readle.domain.quiz.entity.QuizResult;
 import com.realdev.readle.domain.quiz.entity.QuizSet;
+import com.realdev.readle.domain.quiz.exception.QuizErrorCode;
 import com.realdev.readle.domain.quiz.repository.QuizAnswerRepository;
 import com.realdev.readle.domain.quiz.repository.QuizAttemptRepository;
 import com.realdev.readle.domain.quiz.repository.QuizChoiceRepository;
@@ -46,7 +47,7 @@ public class QuizSolveService {
     QuizSet quizSet =
         quizSetRepository
             .findById(quizSetId)
-            .orElseThrow(() -> new CustomException(GlobalErrorCode.NOT_FOUND, "존재하지 않는 퀴즈 세트입니다."));
+            .orElseThrow(() -> new CustomException(QuizErrorCode.QUIZ_NOT_FOUND));
 
     // 퀴즈 세트 상태 검증: COMPLETED 상태가 아니면 시작 불가
     if (quizSet.getStatus() != com.realdev.readle.domain.quiz.entity.QuizSetStatus.COMPLETED) {
@@ -75,7 +76,7 @@ public class QuizSolveService {
     QuizAttempt attempt =
         quizAttemptRepository
             .findById(attemptId)
-            .orElseThrow(() -> new CustomException(GlobalErrorCode.NOT_FOUND, "존재하지 않는 풀이 시도입니다."));
+            .orElseThrow(() -> new CustomException(QuizErrorCode.ATTEMPT_NOT_FOUND));
 
     if (!attempt.getMember().getUuid().equals(memberUuid)) {
       throw new CustomException(GlobalErrorCode.FORBIDDEN, "해당 풀이 정보에 대한 접근 권한이 없습니다.");
@@ -94,14 +95,14 @@ public class QuizSolveService {
     QuizAttempt attempt =
         quizAttemptRepository
             .findById(attemptId)
-            .orElseThrow(() -> new CustomException(GlobalErrorCode.NOT_FOUND, "존재하지 않는 풀이 시도입니다."));
+            .orElseThrow(() -> new CustomException(QuizErrorCode.ATTEMPT_NOT_FOUND));
 
     if (!attempt.getMember().getUuid().equals(memberUuid)) {
       throw new CustomException(GlobalErrorCode.FORBIDDEN, "해당 풀이 정보에 대한 권한이 없습니다.");
     }
 
     if (attempt.getStatus() != com.realdev.readle.domain.quiz.entity.AttemptStatus.IN_PROGRESS) {
-      throw new IllegalArgumentException("이미 제출이 완료되었거나 진행 중이 아닌 풀이입니다.");
+      throw new CustomException(QuizErrorCode.ALREADY_SUBMITTED);
     }
 
     List<QuizQuestion> questions =
@@ -109,7 +110,7 @@ public class QuizSolveService {
 
     // 문제 수 확인
     if (questions.size() != request.getAnswers().size()) {
-      throw new IllegalArgumentException("답안의 개수가 퀴즈 세트의 문제 개수와 일치하지 않습니다.");
+      throw new CustomException(QuizErrorCode.INVALID_ANSWER_COUNT);
     }
 
     Map<Long, QuizSubmitRequest.AnswerRequest> answerMap = new HashMap<>();

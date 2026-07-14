@@ -1,4 +1,4 @@
-package com.realdev.readle.domain.quiz.dto;
+package com.realdev.readle.domain.quiz.dto.response;
 
 import com.realdev.readle.domain.quiz.entity.QuizResult;
 import java.math.BigDecimal;

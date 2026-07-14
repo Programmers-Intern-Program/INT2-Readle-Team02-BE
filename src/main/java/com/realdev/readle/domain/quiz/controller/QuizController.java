@@ -1,7 +1,7 @@
 package com.realdev.readle.domain.quiz.controller;
 
-import com.realdev.readle.domain.quiz.dto.QuizCreateRequest;
-import com.realdev.readle.domain.quiz.dto.QuizCreateResponse;
+import com.realdev.readle.domain.quiz.dto.request.QuizCreateRequest;
+import com.realdev.readle.domain.quiz.dto.response.QuizCreateResponse;
 import com.realdev.readle.domain.quiz.service.QuizGenerationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

@@ -12,13 +12,13 @@ import com.realdev.readle.domain.content.entity.ContentValidation;
 import com.realdev.readle.domain.content.entity.ValidationStatus;
 import com.realdev.readle.domain.content.repository.ContentValidationRepository;
 import com.realdev.readle.domain.member.entity.Member;
-import com.realdev.readle.domain.quiz.dto.QuizCreateResponse;
+import com.realdev.readle.domain.quiz.dto.response.QuizCreateResponse;
 import com.realdev.readle.domain.quiz.entity.QuizSet;
-import com.realdev.readle.domain.quiz.exception.QuizGenerationException;
-import com.realdev.readle.domain.quiz.exception.ValidationNotPassedException;
+import com.realdev.readle.domain.quiz.exception.QuizErrorCode;
 import com.realdev.readle.domain.quiz.repository.QuizChoiceRepository;
 import com.realdev.readle.domain.quiz.repository.QuizQuestionRepository;
 import com.realdev.readle.domain.quiz.repository.QuizSetRepository;
+import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
 import com.realdev.readle.global.infrastructure.prompt.PromptLoader;
 import java.util.Optional;
@@ -65,7 +65,6 @@ class QuizGenerationServiceTest {
 
     member = org.mockito.Mockito.mock(Member.class);
     ReflectionTestUtils.setField(member, "id", 1L);
-    ReflectionTestUtils.setField(quizGenerationService, "self", quizGenerationService);
 
     content = org.mockito.Mockito.mock(Content.class);
     ReflectionTestUtils.setField(content, "id", 1L);
@@ -83,7 +82,8 @@ class QuizGenerationServiceTest {
   void createQuizSet_Success() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
 
     given(transactionTemplate.execute(any()))
         .willAnswer(
@@ -136,12 +136,14 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenPending() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PENDING);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
 
     // when & then
     assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
-        .isInstanceOf(ValidationNotPassedException.class)
-        .hasMessageContaining("생성이 불가능한 상태입니다");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.VALIDATION_NOT_PASSED);
   }
 
   @Test
@@ -149,12 +151,14 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenFailed() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.FAILED);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
 
     // when & then
     assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
-        .isInstanceOf(ValidationNotPassedException.class)
-        .hasMessageContaining("생성이 불가능한 상태입니다");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.VALIDATION_NOT_PASSED);
   }
 
   @Test
@@ -162,7 +166,8 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenContentTextIsBlank() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
     org.mockito.BDDMockito.lenient().when(content.getRawText()).thenReturn("   ");
     org.mockito.BDDMockito.lenient().when(content.getExtractedText()).thenReturn("   ");
 
@@ -183,11 +188,9 @@ class QuizGenerationServiceTest {
 
     // when & then
     assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
-        .isInstanceOf(QuizGenerationException.class)
-        .hasMessageContaining("오류가 발생했습니다")
-        .cause()
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("퀴즈를 생성할 본문 텍스트가 존재하지 않습니다.");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.QUIZ_GENERATION_FAILED);
 
     // 예외 보상 상태 전이 검증 (FAILED 상태 전이 확인)
     assertThat(expectedQuizSet.getStatus())
@@ -199,7 +202,8 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenTagCountExceeded() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
 
     given(transactionTemplate.execute(any()))
         .willAnswer(
@@ -233,13 +237,12 @@ class QuizGenerationServiceTest {
             """;
     given(claudeClient.getGeneratedText(anyString(), anyString())).willReturn(claudeJsonResponse);
 
-    // when & then: parseAndValidate에서 QuizGenerationException 발생 ->
-    // catch에 잡혀 "퀴즈 생성 중 오류" 로 wrap됨
+    // when & then: parseAndValidate에서 CustomException 발생 ->
+    // catch에 잡혀 wrap됨
     assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
-        .isInstanceOf(QuizGenerationException.class)
-        .hasMessageContaining("오류가 발생했습니다")
-        .cause()
-        .hasMessageContaining("태그 수가 1~3개 범위를 벗어나거나");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.QUIZ_GENERATION_FAILED);
   }
 
   @Test
@@ -247,7 +250,8 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenNoCorrectAnswer() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
 
     given(transactionTemplate.execute(any()))
         .willAnswer(
@@ -282,13 +286,12 @@ class QuizGenerationServiceTest {
             """;
     given(claudeClient.getGeneratedText(anyString(), anyString())).willReturn(claudeJsonResponse);
 
-    // when & then: 문제 저장 트랜잭션 내에서 QuizGenerationException 발생 ->
+    // when & then: 문제 저장 트랜잭션 내에서 CustomException 발생 ->
     // catch에 잡혀 wrap됨
     assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
-        .isInstanceOf(QuizGenerationException.class)
-        .hasMessageContaining("오류가 발생했습니다")
-        .cause()
-        .hasMessageContaining("정답 개수가 1개가 아닙니다");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.QUIZ_GENERATION_FAILED);
   }
 
   @Test
@@ -296,7 +299,8 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenMultipleChoiceOptionsEmpty() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
 
     given(transactionTemplate.execute(any()))
         .willAnswer(
@@ -333,10 +337,9 @@ class QuizGenerationServiceTest {
 
     // when & then
     assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
-        .isInstanceOf(QuizGenerationException.class)
-        .hasMessageContaining("오류가 발생했습니다")
-        .cause()
-        .hasMessageContaining("객관식 문제에 선택지가 없습니다");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.QUIZ_GENERATION_FAILED);
   }
 
   @Test
@@ -344,7 +347,8 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenUnknownType() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
-    given(contentValidationRepository.findById(100L)).willReturn(Optional.of(validation));
+    given(contentValidationRepository.findByIdWithContent(100L))
+        .willReturn(Optional.of(validation));
 
     given(transactionTemplate.execute(any()))
         .willAnswer(
@@ -378,12 +382,11 @@ class QuizGenerationServiceTest {
             """;
     given(claudeClient.getGeneratedText(anyString(), anyString())).willReturn(claudeJsonResponse);
 
-    // when & then: 문제 저장 트랜잭션 내에서 QuizGenerationException 발생 ->
+    // when & then: 문제 저장 트랜잭션 내에서 CustomException 발생 ->
     // catch에 잡혀 wrap됨
     assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
-        .isInstanceOf(QuizGenerationException.class)
-        .hasMessageContaining("오류가 발생했습니다")
-        .cause()
-        .hasMessageContaining("알 수 없는 문제 유형입니다");
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.QUIZ_GENERATION_FAILED);
   }
 }

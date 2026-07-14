@@ -1,4 +1,4 @@
-package com.realdev.readle.domain.quiz.dto;
+package com.realdev.readle.domain.quiz.dto.request;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;

@@ -6,8 +6,8 @@ import static org.mockito.BDDMockito.given;
 
 import com.realdev.readle.domain.content.entity.ContentValidation;
 import com.realdev.readle.domain.content.repository.ContentValidationRepository;
-import com.realdev.readle.domain.quiz.exception.QuizGenerationException;
 import com.realdev.readle.domain.quiz.repository.QuizSetRepository;
+import com.realdev.readle.global.exception.CustomException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -122,7 +122,7 @@ class QuizConcurrencyTest {
             try {
               quizGenerationService.createQuizSet(validationId);
               successCount.incrementAndGet();
-            } catch (QuizGenerationException e) {
+            } catch (CustomException e) {
               failCount.incrementAndGet();
             } finally {
               latch.countDown();

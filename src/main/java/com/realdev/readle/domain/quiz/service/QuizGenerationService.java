@@ -6,17 +6,17 @@ import com.realdev.readle.domain.content.entity.ContentValidation;
 import com.realdev.readle.domain.content.entity.ValidationStatus;
 import com.realdev.readle.domain.content.repository.ContentValidationRepository;
 import com.realdev.readle.domain.quiz.dto.ClaudeQuizResponseDto;
-import com.realdev.readle.domain.quiz.dto.QuizCreateResponse;
+import com.realdev.readle.domain.quiz.dto.response.QuizCreateResponse;
 import com.realdev.readle.domain.quiz.entity.QuestionType;
 import com.realdev.readle.domain.quiz.entity.QuizChoice;
 import com.realdev.readle.domain.quiz.entity.QuizQuestion;
 import com.realdev.readle.domain.quiz.entity.QuizSet;
 import com.realdev.readle.domain.quiz.entity.QuizSetStatus;
-import com.realdev.readle.domain.quiz.exception.QuizGenerationException;
-import com.realdev.readle.domain.quiz.exception.ValidationNotPassedException;
+import com.realdev.readle.domain.quiz.exception.QuizErrorCode;
 import com.realdev.readle.domain.quiz.repository.QuizChoiceRepository;
 import com.realdev.readle.domain.quiz.repository.QuizQuestionRepository;
 import com.realdev.readle.domain.quiz.repository.QuizSetRepository;
+import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
 import com.realdev.readle.global.infrastructure.prompt.PromptLoader;
 import java.util.Map;
@@ -41,19 +41,15 @@ public class QuizGenerationService {
 
   private final TransactionTemplate transactionTemplate;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  @org.springframework.context.annotation.Lazy
-  private QuizGenerationService self;
-
   public QuizCreateResponse createQuizSet(Long sourceValidationId) {
     ContentValidation validation =
         contentValidationRepository
-            .findById(sourceValidationId)
+            .findByIdWithContent(sourceValidationId)
             .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
 
     // Validation 상태 분기: PASSED만 허용하는 allow-list로 변경
     if (validation.getStatus() != ValidationStatus.PASSED) {
-      throw new ValidationNotPassedException("해당 콘텐츠는 퀴즈 생성이 불가능한 상태입니다.");
+      throw new CustomException(QuizErrorCode.VALIDATION_NOT_PASSED);
     }
     final boolean isBypassed = false;
 
@@ -68,14 +64,16 @@ public class QuizGenerationService {
                   quizSetRepository.delete(existing);
                   quizSetRepository.flush();
                 } else {
-                  throw new QuizGenerationException("이미 해당 콘텐츠에 대한 퀴즈 생성 요청이 진행 중이거나 완료되었습니다.");
+                  throw new CustomException(
+                      QuizErrorCode.QUIZ_GENERATION_FAILED,
+                      "이미 해당 콘텐츠에 대한 퀴즈 생성 요청이 진행 중이거나 완료되었습니다.");
                 }
               }
 
               // Detached 객체 대신 Managed 객체를 재조회하여 사용
               ContentValidation managedValidation =
                   contentValidationRepository
-                      .findById(sourceValidationId)
+                      .findByIdWithContent(sourceValidationId)
                       .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
 
               QuizSet newQuizSet;
@@ -84,14 +82,20 @@ public class QuizGenerationService {
                     QuizSet.create(managedValidation.getContent(), managedValidation, isBypassed);
                 return quizSetRepository.saveAndFlush(newQuizSet);
               } catch (DataIntegrityViolationException e) {
-                throw new QuizGenerationException("이미 해당 콘텐츠에 대한 퀴즈 생성 요청이 진행 중이거나 완료되었습니다.");
+                throw new CustomException(
+                    QuizErrorCode.QUIZ_GENERATION_FAILED,
+                    "이미 해당 콘텐츠에 대한 퀴즈 생성 요청이 진행 중이거나 완료되었습니다.",
+                    e);
               }
             });
 
     try {
       // 2. AI Prompt 생성 및 호출 (Non-Transactional)
-      // 전용 readOnly 트랜잭션 메서드를 호출하여 지연 로딩 방지
-      String articleText = self.getArticleText(sourceValidationId);
+      // Fetch Join으로 가져온 validation에서 지연 로딩 예외 없이 본문 조회
+      String articleText =
+          validation.getContent().getRawText() != null
+              ? validation.getContent().getRawText()
+              : validation.getContent().getExtractedText();
 
       if (articleText == null || articleText.isBlank()) {
         throw new IllegalArgumentException("퀴즈를 생성할 본문 텍스트가 존재하지 않습니다.");
@@ -130,7 +134,10 @@ public class QuizGenerationService {
               try {
                 type = QuestionType.valueOf(quizDto.getType().toUpperCase());
               } catch (IllegalArgumentException e) {
-                throw new QuizGenerationException("알 수 없는 문제 유형입니다: " + quizDto.getType());
+                throw new CustomException(
+                    QuizErrorCode.QUIZ_GENERATION_FAILED,
+                    "알 수 없는 문제 유형입니다: " + quizDto.getType(),
+                    e);
               }
 
               // 사후 검증: 본문에 코드가 없는데 CODE_BLANK 유형의 문제가 생성된 경우 건너뜀
@@ -142,7 +149,9 @@ public class QuizGenerationService {
               // SHORT_ANSWER / CODE_BLANK는 정답이 null이거나 공백이면 거부
               if (type != QuestionType.MULTIPLE_CHOICE) {
                 if (quizDto.getAnswer() == null || quizDto.getAnswer().isBlank()) {
-                  throw new QuizGenerationException(type.name() + " 문제의 정답(answer)이 비어있습니다.");
+                  throw new CustomException(
+                      QuizErrorCode.QUIZ_GENERATION_FAILED,
+                      type.name() + " 문제의 정답(answer)이 비어있습니다.");
                 }
               }
 
@@ -160,7 +169,8 @@ public class QuizGenerationService {
 
               if (type == QuestionType.MULTIPLE_CHOICE) {
                 if (quizDto.getOptions() == null || quizDto.getOptions().isEmpty()) {
-                  throw new QuizGenerationException("객관식 문제에 선택지가 없습니다.");
+                  throw new CustomException(
+                      QuizErrorCode.QUIZ_GENERATION_FAILED, "객관식 문제에 선택지가 없습니다.");
                 }
 
                 int correctChoiceCount = 0;
@@ -173,7 +183,8 @@ public class QuizGenerationService {
                   quizChoiceRepository.save(choice);
                 }
                 if (correctChoiceCount != 1) {
-                  throw new QuizGenerationException("객관식 문제의 정답 개수가 1개가 아닙니다.");
+                  throw new CustomException(
+                      QuizErrorCode.QUIZ_GENERATION_FAILED, "객관식 문제의 정답 개수가 1개가 아닙니다.");
                 }
               }
             }
@@ -193,7 +204,10 @@ public class QuizGenerationService {
             return null;
           });
       log.error("퀴즈 생성 실패: {}", e.getMessage(), e);
-      throw new QuizGenerationException("퀴즈 생성 중 오류가 발생했습니다.", e);
+      if (e instanceof CustomException) {
+        throw (CustomException) e;
+      }
+      throw new CustomException(QuizErrorCode.QUIZ_GENERATION_FAILED, "퀴즈 생성 중 오류가 발생했습니다.", e);
     }
   }
 
@@ -211,32 +225,23 @@ public class QuizGenerationService {
           objectMapper.readValue(jsonResponse, ClaudeQuizResponseDto.class);
 
       if (response.getQuizzes() == null || response.getQuizzes().isEmpty()) {
-        throw new QuizGenerationException("퀴즈 목록이 비어있습니다.");
+        throw new CustomException(QuizErrorCode.QUIZ_GENERATION_FAILED, "퀴즈 목록이 비어있습니다.");
       }
       if (response.getQuizzes().size() < 1 || response.getQuizzes().size() > 5) {
-        throw new QuizGenerationException("생성된 문제 수가 1~5개 범위를 벗어납니다.");
+        throw new CustomException(
+            QuizErrorCode.QUIZ_GENERATION_FAILED, "생성된 문제 수가 1~5개 범위를 벗어납니다.");
       }
       if (response.getTags() == null
           || response.getTags().isEmpty()
           || response.getTags().size() < 1
           || response.getTags().size() > 3) {
-        throw new QuizGenerationException("생성된 태그 수가 1~3개 범위를 벗어나거나 비어있습니다.");
+        throw new CustomException(
+            QuizErrorCode.QUIZ_GENERATION_FAILED, "생성된 태그 수가 1~3개 범위를 벗어나거나 비어있습니다.");
       }
 
       return response;
     } catch (JsonProcessingException e) {
-      throw new QuizGenerationException("AI 응답 JSON 파싱에 실패했습니다.", e);
+      throw new CustomException(QuizErrorCode.QUIZ_GENERATION_FAILED, "AI 응답 JSON 파싱에 실패했습니다.", e);
     }
-  }
-
-  @org.springframework.transaction.annotation.Transactional(readOnly = true)
-  public String getArticleText(Long sourceValidationId) {
-    ContentValidation v =
-        contentValidationRepository
-            .findById(sourceValidationId)
-            .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
-    return v.getContent().getRawText() != null
-        ? v.getContent().getRawText()
-        : v.getContent().getExtractedText();
   }
 }
