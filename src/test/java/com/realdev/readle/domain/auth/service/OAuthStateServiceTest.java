@@ -29,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -100,6 +101,15 @@ class OAuthStateServiceTest {
     reset(stateRepository);
     when(stateRepository.findByStateHashAndOauthProvider(any(), any()))
         .thenThrow(new CannotAcquireLockException("lock unavailable"));
+
+    assertThatThrownBy(() -> service.consume(OAuthProvider.GOOGLE, "state"))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(GlobalErrorCode.OAUTH_AUTHORIZATION_FAILED);
+
+    reset(stateRepository);
+    when(stateRepository.findByStateHashAndOauthProvider(any(), any()))
+        .thenThrow(new PessimisticLockingFailureException("lock unavailable"));
 
     assertThatThrownBy(() -> service.consume(OAuthProvider.GOOGLE, "state"))
         .isInstanceOf(CustomException.class)

@@ -25,7 +25,7 @@ import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.server.PathContainer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -105,7 +105,7 @@ public class OAuthStateService {
     try {
       consumed =
           consumeTransactionTemplate.execute(status -> consumeInTransaction(provider, rawState));
-    } catch (PessimisticLockException | CannotAcquireLockException exception) {
+    } catch (PessimisticLockException | PessimisticLockingFailureException exception) {
       throw oauthFailure();
     }
     if (consumed == null) {
