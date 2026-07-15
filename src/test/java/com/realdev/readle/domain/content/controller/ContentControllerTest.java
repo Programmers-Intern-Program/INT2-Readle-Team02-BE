@@ -1,5 +1,7 @@
 package com.realdev.readle.domain.content.controller;
 
+import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -151,6 +153,17 @@ class ContentControllerTest {
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.contentId").value(1L))
         .andExpect(jsonPath("$.validationStatus").value("PENDING"));
+
+    org.mockito.ArgumentCaptor<ContentCreateRequest> requestCaptor =
+        org.mockito.ArgumentCaptor.forClass(ContentCreateRequest.class);
+    verify(contentService).createContent(requestCaptor.capture(), eq(memberUuid));
+
+    ContentCreateRequest captured = requestCaptor.getValue();
+    assertThat(captured.inputType()).isEqualTo(InputType.TEXT);
+    assertThat(captured.title()).isEqualTo("제목");
+    assertThat(captured.url()).isNull();
+    assertThat(captured.extractedText()).isNull();
+    assertThat(captured.text()).isEqualTo("본문 내용입니다.");
   }
 
   @Test
@@ -172,6 +185,17 @@ class ContentControllerTest {
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.contentId").value(2L))
         .andExpect(jsonPath("$.validationStatus").value("PENDING"));
+
+    org.mockito.ArgumentCaptor<ContentCreateRequest> requestCaptor =
+        org.mockito.ArgumentCaptor.forClass(ContentCreateRequest.class);
+    verify(contentService).createContent(requestCaptor.capture(), eq(memberUuid));
+
+    ContentCreateRequest captured = requestCaptor.getValue();
+    assertThat(captured.inputType()).isEqualTo(InputType.URL);
+    assertThat(captured.title()).isEqualTo("제목");
+    assertThat(captured.url()).isEqualTo("https://example.com");
+    assertThat(captured.extractedText()).isEqualTo("추출된 본문");
+    assertThat(captured.text()).isNull();
   }
 
   @Test
