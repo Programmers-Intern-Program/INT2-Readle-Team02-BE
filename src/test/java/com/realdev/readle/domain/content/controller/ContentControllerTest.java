@@ -23,7 +23,6 @@ import com.realdev.readle.domain.content.service.ContentService;
 import com.realdev.readle.domain.member.exception.MemberErrorCode;
 import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.exception.GlobalErrorCode;
-import com.realdev.readle.global.security.SecurityConfig;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
