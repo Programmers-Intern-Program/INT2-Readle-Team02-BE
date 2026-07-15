@@ -10,7 +10,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.realdev.readle.domain.quiz.dto.ClaudeGradingResponseDto;
 import com.realdev.readle.domain.quiz.entity.QuizQuestion;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
 import com.realdev.readle.global.infrastructure.prompt.PromptLoader;
@@ -37,8 +36,15 @@ class QuizAiGradingServiceTest {
 
   @BeforeEach
   void setUp() {
+    // We inject a real ObjectMapper to test Jackson annotations (@JsonIgnoreProperties etc)
+    objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    ReflectionTestUtils.setField(quizAiGradingService, "objectMapper", objectMapper);
+
+    // Use a real executor for timeout tests
     ReflectionTestUtils.setField(
-        quizAiGradingService, "gradingExecutor", (java.util.concurrent.Executor) Runnable::run);
+        quizAiGradingService,
+        "gradingExecutor",
+        java.util.concurrent.Executors.newSingleThreadExecutor());
 
     question = mock(QuizQuestion.class);
     ReflectionTestUtils.setField(question, "id", 10L);
@@ -54,11 +60,7 @@ class QuizAiGradingServiceTest {
     given(claudeClient.getGeneratedText(any(), any()))
         .willReturn("{\"isCorrect\": true, \"aiFeedback\": null}");
 
-    ClaudeGradingResponseDto mockDto = new ClaudeGradingResponseDto(true, null);
-    given(
-            objectMapper.readValue(
-                "{\"isCorrect\": true, \"aiFeedback\": null}", ClaudeGradingResponseDto.class))
-        .willReturn(mockDto);
+    // No need to stub ObjectMapper because it's real
 
     // when
     CompletableFuture<QuizAiGradingService.AiEvaluationResult> future =
@@ -84,15 +86,7 @@ class QuizAiGradingServiceTest {
         .willReturn("invalid_json")
         .willReturn("{\"isCorrect\": false, \"aiFeedback\": \"틀림\"}");
 
-    // 첫번째 ObjectMapper 호출에서 예외 발생
-    given(objectMapper.readValue("invalid_json", ClaudeGradingResponseDto.class))
-        .willThrow(new com.fasterxml.jackson.core.JsonParseException(null, "Parsing error"));
-
-    ClaudeGradingResponseDto mockDto = new ClaudeGradingResponseDto(false, "틀림");
-    given(
-            objectMapper.readValue(
-                "{\"isCorrect\": false, \"aiFeedback\": \"틀림\"}", ClaudeGradingResponseDto.class))
-        .willReturn(mockDto);
+    // No need to stub ObjectMapper
 
     // when
     CompletableFuture<QuizAiGradingService.AiEvaluationResult> future =
@@ -134,9 +128,7 @@ class QuizAiGradingServiceTest {
     // 두 번 모두 isCorrect 필드가 누락된 JSON 반환
     given(claudeClient.getGeneratedText(any(), any())).willReturn("{\"aiFeedback\": \"어쩌구저쩌구\"}");
 
-    ClaudeGradingResponseDto mockDto = new ClaudeGradingResponseDto(null, "어쩌구저쩌구");
-    given(objectMapper.readValue("{\"aiFeedback\": \"어쩌구저쩌구\"}", ClaudeGradingResponseDto.class))
-        .willReturn(mockDto);
+    // No need to stub ObjectMapper
 
     CompletableFuture<QuizAiGradingService.AiEvaluationResult> future =
         quizAiGradingService.gradeAnswerAsync(question, "오답", "본문 텍스트");

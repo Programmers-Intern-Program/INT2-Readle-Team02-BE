@@ -3,6 +3,7 @@ package com.realdev.readle.domain.quiz.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -28,6 +29,7 @@ import com.realdev.readle.domain.quiz.repository.QuizQuestionRepository;
 import com.realdev.readle.domain.quiz.repository.QuizResultRepository;
 import com.realdev.readle.domain.quiz.repository.QuizSetRepository;
 import com.realdev.readle.global.exception.CustomException;
+import com.realdev.readle.global.exception.GlobalErrorCode;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,7 +99,7 @@ class QuizSolveServiceTest {
     question2 = mock(QuizQuestion.class);
     lenient().when(question2.getId()).thenReturn(11L);
     lenient().when(question2.getQuestionType()).thenReturn(QuestionType.SHORT_ANSWER);
-    lenient().when(question2.getCorrectAnswer()).thenReturn("스프링");
+    lenient().when(question2.getCorrectAnswer()).thenReturn("Spring Framework");
     lenient().when(question2.getOrderNo()).thenReturn(2);
     lenient().when(question2.getQuizSet()).thenReturn(quizSet);
   }
@@ -137,13 +139,30 @@ class QuizSolveServiceTest {
 
     lenient().when(quizAttempt.getSubmittedAt()).thenReturn(java.time.LocalDateTime.now());
 
-    given(quizAiGradingService.gradeAnswerAsync(any(), any(), any()))
-        .willReturn(
-            java.util.concurrent.CompletableFuture.completedFuture(
-                new QuizAiGradingService.AiEvaluationResult(
-                    question2, "스프링 프레임워크", true, "정답입니다.")));
+    java.util.concurrent.CompletableFuture<QuizAiGradingService.AiEvaluationResult> future1 =
+        new java.util.concurrent.CompletableFuture<>();
+    given(quizAiGradingService.gradeAnswerAsync(eq(question2), eq("스프링 프레임워크"), any()))
+        .willReturn(future1);
 
-    QuizSubmitResponse response = quizSolveService.submitAnswers(200L, "test-uuid", request);
+    // Call submitAnswers in a separate thread because it will block on future1.join()
+    java.util.concurrent.CompletableFuture<QuizSubmitResponse> responseFuture =
+        java.util.concurrent.CompletableFuture.supplyAsync(
+            () -> quizSolveService.submitAnswers(200L, "test-uuid", request));
+
+    // Ensure gradeAnswerAsync was called before the future is completed (verifying
+    // concurrency/waiting)
+    try {
+      Thread.sleep(100); // Give submitAnswers thread time to hit gradeAnswerAsync
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    }
+    verify(quizAiGradingService, times(1)).gradeAnswerAsync(eq(question2), eq("스프링 프레임워크"), any());
+
+    // Now complete the future
+    future1.complete(
+        new QuizAiGradingService.AiEvaluationResult(question2, "스프링 프레임워크", true, "정답입니다."));
+
+    QuizSubmitResponse response = responseFuture.join();
 
     assertThat(response.getTotalCount()).isEqualTo(2);
     assertThat(response.getCorrectCount()).isEqualTo(2); // 둘 다 정답 처리됨 (Mocking 로직)
@@ -167,7 +186,7 @@ class QuizSolveServiceTest {
 
     QuizSubmitRequest.AnswerRequest ans2 = new QuizSubmitRequest.AnswerRequest();
     ReflectionTestUtils.setField(ans2, "questionId", 11L);
-    ReflectionTestUtils.setField(ans2, "submittedAnswerText", " 스프링   "); // 정답과 매칭됨
+    ReflectionTestUtils.setField(ans2, "submittedAnswerText", "  spring   framework  "); // 정답과 매칭됨
 
     ReflectionTestUtils.setField(request, "answers", List.of(ans1, ans2));
     lenient().when(quizAttempt.getSubmittedAt()).thenReturn(java.time.LocalDateTime.now());
@@ -200,7 +219,7 @@ class QuizSolveServiceTest {
     ReflectionTestUtils.setField(request, "answers", List.of(ans1, ans2));
     lenient().when(quizAttempt.getSubmittedAt()).thenReturn(java.time.LocalDateTime.now());
 
-    given(quizAiGradingService.gradeAnswerAsync(any(), any(), any()))
+    given(quizAiGradingService.gradeAnswerAsync(eq(question2), eq("자바"), any()))
         .willReturn(
             java.util.concurrent.CompletableFuture.completedFuture(
                 new QuizAiGradingService.AiEvaluationResult(question2, "자바", false, "틀렸습니다.")));
@@ -209,7 +228,7 @@ class QuizSolveServiceTest {
 
     assertThat(response.getTotalCount()).isEqualTo(2);
     assertThat(response.getCorrectCount()).isEqualTo(1); // 객관식만 정답
-    verify(quizAiGradingService, times(1)).gradeAnswerAsync(any(), any(), any());
+    verify(quizAiGradingService, times(1)).gradeAnswerAsync(eq(question2), eq("자바"), any());
     verify(quizAnswerRepository, times(2)).saveAll(any());
   }
 
@@ -232,5 +251,38 @@ class QuizSolveServiceTest {
         .isInstanceOf(CustomException.class)
         .extracting("errorCode")
         .isEqualTo(QuizErrorCode.INVALID_ANSWER_COUNT);
+  }
+
+  @Test
+  @DisplayName("권한 없는 사용자(memberUuid 불일치) 제출 시 FORBIDDEN 발생")
+  void submitAnswers_Forbidden() {
+    given(quizAttemptRepository.findById(200L)).willReturn(Optional.of(quizAttempt));
+
+    QuizSubmitRequest request = new QuizSubmitRequest();
+
+    assertThatThrownBy(() -> quizSolveService.submitAnswers(200L, "wrong-uuid", request))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(GlobalErrorCode.FORBIDDEN);
+
+    verify(quizAiGradingService, times(0)).gradeAnswerAsync(any(), any(), any());
+    verify(quizAnswerRepository, times(0)).saveAll(any());
+  }
+
+  @Test
+  @DisplayName("이미 제출 완료된 퀴즈 재제출 시 ALREADY_SUBMITTED 발생")
+  void submitAnswers_AlreadySubmitted() {
+    given(quizAttemptRepository.findById(200L)).willReturn(Optional.of(quizAttempt));
+    lenient().when(quizAttempt.getStatus()).thenReturn(AttemptStatus.SUBMITTED);
+
+    QuizSubmitRequest request = new QuizSubmitRequest();
+
+    assertThatThrownBy(() -> quizSolveService.submitAnswers(200L, "test-uuid", request))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.ALREADY_SUBMITTED);
+
+    verify(quizAiGradingService, times(0)).gradeAnswerAsync(any(), any(), any());
+    verify(quizAnswerRepository, times(0)).saveAll(any());
   }
 }
