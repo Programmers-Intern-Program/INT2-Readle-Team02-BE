@@ -301,8 +301,7 @@ class ContentServiceTest {
   void createContent_textType_withUrl_throwsUnnecessaryUrlInfo() {
     UUID memberUuid = UUID.randomUUID();
     ContentCreateRequest request =
-        new ContentCreateRequest(
-            InputType.TEXT, "제목", "https://example.com", null, "본문 내용");
+        new ContentCreateRequest(InputType.TEXT, "제목", "https://example.com", null, "본문 내용");
 
     assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
         .isInstanceOf(CustomException.class)
@@ -317,8 +316,7 @@ class ContentServiceTest {
   void createContent_textType_withExtractedText_throwsUnnecessaryUrlInfo() {
     UUID memberUuid = UUID.randomUUID();
     ContentCreateRequest request =
-        new ContentCreateRequest(
-            InputType.TEXT, "제목", null, "추출된 본문", "본문 내용");
+        new ContentCreateRequest(InputType.TEXT, "제목", null, "추출된 본문", "본문 내용");
 
     assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
         .isInstanceOf(CustomException.class)

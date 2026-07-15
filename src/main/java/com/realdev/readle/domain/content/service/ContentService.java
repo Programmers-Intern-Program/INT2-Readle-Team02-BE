@@ -44,9 +44,10 @@ public class ContentService {
     validateCreateRequest(request);
 
     // 1. 회원 조회
-    Member member = memberRepository
-        .findByUuid(memberUuid.toString())
-        .orElseThrow(() -> new CustomException(MemberErrorCode.MEMBER_NOT_FOUND));
+    Member member =
+        memberRepository
+            .findByUuid(memberUuid.toString())
+            .orElseThrow(() -> new CustomException(MemberErrorCode.MEMBER_NOT_FOUND));
 
     // 2. 저장
     Content content = buildContent(request, member);
@@ -69,7 +70,8 @@ public class ContentService {
     }
 
     // 공통 텍스트 길이 검증 (Fast Fail)
-    String contentText = (request.inputType() == InputType.TEXT) ? request.text() : request.extractedText();
+    String contentText =
+        (request.inputType() == InputType.TEXT) ? request.text() : request.extractedText();
     if (contentText.length() > MAX_TEXT_LENGTH) {
       throw new CustomException(ContentErrorCode.CONTENT_TOO_LARGE);
     }

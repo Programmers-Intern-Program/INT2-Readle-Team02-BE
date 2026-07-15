@@ -262,7 +262,9 @@ class ContentControllerTest {
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error.code").value("MISSING_EXTRACTED_TEXT"))
-        .andExpect(jsonPath("$.error.message").value("URL 본문 추출 결과가 누락되었습니다. 먼저 본문 추출을 완료한 후 등록을 요청해 주세요."));
+        .andExpect(
+            jsonPath("$.error.message")
+                .value("URL 본문 추출 결과가 누락되었습니다. 먼저 본문 추출을 완료한 후 등록을 요청해 주세요."));
   }
 
   @Test
@@ -302,7 +304,8 @@ class ContentControllerTest {
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error.code").value("UNNECESSARY_URL_INFO"))
-        .andExpect(jsonPath("$.error.message").value("텍스트 입력 시 url 및 extractedText 필드는 비어 있어야 합니다."));
+        .andExpect(
+            jsonPath("$.error.message").value("텍스트 입력 시 url 및 extractedText 필드는 비어 있어야 합니다."));
   }
 
   @Test

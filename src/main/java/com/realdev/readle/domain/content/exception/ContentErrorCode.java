@@ -17,7 +17,8 @@ public enum ContentErrorCode implements ErrorCode {
   CONTENT_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "텍스트가 15,000자를 초과합니다."),
   URL_REQUIRED(HttpStatus.BAD_REQUEST, "URL 입력 시 url은 필수입니다."),
   TEXT_REQUIRED(HttpStatus.BAD_REQUEST, "텍스트 입력 시 text는 필수입니다."),
-  MISSING_EXTRACTED_TEXT(HttpStatus.BAD_REQUEST, "URL 본문 추출 결과가 누락되었습니다. 먼저 본문 추출을 완료한 후 등록을 요청해 주세요."),
+  MISSING_EXTRACTED_TEXT(
+      HttpStatus.BAD_REQUEST, "URL 본문 추출 결과가 누락되었습니다. 먼저 본문 추출을 완료한 후 등록을 요청해 주세요."),
   UNNECESSARY_TEXT(HttpStatus.BAD_REQUEST, "URL 입력 시 text 필드는 비어 있어야 합니다."),
   UNNECESSARY_URL_INFO(HttpStatus.BAD_REQUEST, "텍스트 입력 시 url 및 extractedText 필드는 비어 있어야 합니다.");
 
