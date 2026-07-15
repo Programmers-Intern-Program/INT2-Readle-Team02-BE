@@ -15,8 +15,8 @@ import com.realdev.readle.domain.member.repository.MemberRepository;
 import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.realdev.readle.global.util.crawler.WebCrawler;
-import java.net.MalformedURLException;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -111,12 +111,15 @@ public class ContentService {
 
   private void validateUrlFormat(String urlString) {
     try {
-      URL parsedUrl = new URL(urlString);
-      String protocol = parsedUrl.getProtocol();
-      if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+      URI parsedUri = new URI(urlString);
+      String scheme = parsedUri.getScheme();
+      if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
         throw new CustomException(ContentErrorCode.INVALID_URL);
       }
-    } catch (MalformedURLException e) {
+      if (parsedUri.getHost() == null || parsedUri.getHost().isBlank()) {
+        throw new CustomException(ContentErrorCode.INVALID_URL);
+      }
+    } catch (URISyntaxException | NullPointerException e) {
       throw new CustomException(ContentErrorCode.INVALID_URL);
     }
   }

@@ -386,6 +386,21 @@ class ContentServiceTest {
     verify(memberRepository, never()).findByUuid(any());
   }
 
+  @Test
+  @DisplayName("inputType=URL일 때 호스트가 누락된 URL 형식이면 INVALID_URL 예외가 발생한다")
+  void createContent_urlType_missingHost_throwsInvalidUrl() {
+    UUID memberUuid = UUID.randomUUID();
+    ContentCreateRequest request =
+        new ContentCreateRequest(InputType.URL, "제목", "https:example.com", "본문", null);
+
+    assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_URL);
+
+    verify(memberRepository, never()).findByUuid(any());
+  }
+
   private final ArgumentCaptor<Content> contentCaptor = ArgumentCaptor.forClass(Content.class);
 
   private Member mockMember() {

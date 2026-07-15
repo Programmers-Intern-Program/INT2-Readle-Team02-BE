@@ -23,21 +23,35 @@ import com.realdev.readle.domain.content.service.ContentService;
 import com.realdev.readle.domain.member.exception.MemberErrorCode;
 import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.exception.GlobalErrorCode;
+import com.realdev.readle.global.security.JwtService;
+import com.realdev.readle.global.security.SecurityConfig;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(ContentController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@Import(SecurityConfig.class)
+@TestPropertySource(
+    properties = {
+      "security.jwtIssuer=test-issuer",
+      "security.jwtSecret=test-secret-test-secret-test-secret-32bytes",
+      "security.jwtAudience=test-audience",
+      "security.accessTokenMinutes=30",
+      "security.refreshTokenDays=7",
+      "security.stateEncryptionKey=1234567890123456",
+      "security.stateMinutes=5",
+      "security.backendOrigin=http://localhost:8080"
+    })
 class ContentControllerTest {
 
   @Autowired private MockMvc mockMvc;
@@ -45,10 +59,13 @@ class ContentControllerTest {
   @Autowired private ObjectMapper objectMapper;
 
   @MockitoBean private ContentService contentService;
+  @MockitoBean private JwtService jwtService;
 
   @Test
   @DisplayName("정상적인 URL 요청 시 본문과 제목을 추출하여 200 OK를 반환한다")
   void extractSuccess() throws Exception {
+    UUID memberUuid = UUID.randomUUID();
+    Authentication auth = new UsernamePasswordAuthenticationToken(memberUuid, null, List.of());
     ContentExtractRequest request = new ContentExtractRequest("https://example.com");
     ContentExtractResponse response = new ContentExtractResponse("추출된 제목", "추출된 마크다운 본문");
 
@@ -57,6 +74,7 @@ class ContentControllerTest {
     mockMvc
         .perform(
             post("/api/contents/extract")
+                .with(authentication(auth))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isOk())
@@ -67,11 +85,14 @@ class ContentControllerTest {
   @Test
   @DisplayName("요청 DTO의 URL이 빈 값일 경우 400 INVALID_INPUT 에러를 반환한다")
   void extractValidationFailure() throws Exception {
+    UUID memberUuid = UUID.randomUUID();
+    Authentication auth = new UsernamePasswordAuthenticationToken(memberUuid, null, List.of());
     ContentExtractRequest request = new ContentExtractRequest("   ");
 
     mockMvc
         .perform(
             post("/api/contents/extract")
+                .with(authentication(auth))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isBadRequest())
@@ -82,6 +103,8 @@ class ContentControllerTest {
   @Test
   @DisplayName("잘못된 스킴의 URL이 전송되면 400 INVALID_URL 에러를 반환한다")
   void extractInvalidUrl() throws Exception {
+    UUID memberUuid = UUID.randomUUID();
+    Authentication auth = new UsernamePasswordAuthenticationToken(memberUuid, null, List.of());
     ContentExtractRequest request = new ContentExtractRequest("invalid-url-scheme");
 
     when(contentService.extract(any(ContentExtractRequest.class)))
@@ -90,6 +113,7 @@ class ContentControllerTest {
     mockMvc
         .perform(
             post("/api/contents/extract")
+                .with(authentication(auth))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isBadRequest())
@@ -100,6 +124,8 @@ class ContentControllerTest {
   @Test
   @DisplayName("크롤링 타임아웃 발생 시 422 CRAWLING_TIMEOUT 에러를 반환한다")
   void extractTimeout() throws Exception {
+    UUID memberUuid = UUID.randomUUID();
+    Authentication auth = new UsernamePasswordAuthenticationToken(memberUuid, null, List.of());
     ContentExtractRequest request = new ContentExtractRequest("https://timeout-url.com");
 
     when(contentService.extract(any(ContentExtractRequest.class)))
@@ -108,6 +134,7 @@ class ContentControllerTest {
     mockMvc
         .perform(
             post("/api/contents/extract")
+                .with(authentication(auth))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isUnprocessableEntity())
@@ -118,6 +145,8 @@ class ContentControllerTest {
   @Test
   @DisplayName("크롤링 연결 실패 또는 본문 정제 실패 시 422 EXTRACT_FAILED 에러를 반환한다")
   void extractFailed() throws Exception {
+    UUID memberUuid = UUID.randomUUID();
+    Authentication auth = new UsernamePasswordAuthenticationToken(memberUuid, null, List.of());
     ContentExtractRequest request = new ContentExtractRequest("https://blocked-url.com");
 
     when(contentService.extract(any(ContentExtractRequest.class)))
@@ -126,6 +155,7 @@ class ContentControllerTest {
     mockMvc
         .perform(
             post("/api/contents/extract")
+                .with(authentication(auth))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
         .andExpect(status().isUnprocessableEntity())
@@ -378,6 +408,26 @@ class ContentControllerTest {
     Authentication auth = new UsernamePasswordAuthenticationToken(memberUuid, null, List.of());
     ContentCreateRequest request =
         new ContentCreateRequest(InputType.URL, "제목", "invalid-url-format", "본문", null);
+    when(contentService.createContent(any(ContentCreateRequest.class), eq(memberUuid)))
+        .thenThrow(new CustomException(ContentErrorCode.INVALID_URL));
+    mockMvc
+        .perform(
+            post("/api/contents")
+                .with(authentication(auth))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.code").value("INVALID_URL"))
+        .andExpect(jsonPath("$.error.message").value("올바르지 않은 URL 형식입니다."));
+  }
+
+  @Test
+  @DisplayName("URL 타입 등록 시 호스트가 없는 URL 형식이면 400 INVALID_URL 에러를 반환한다")
+  void createContent_missingHostUrl() throws Exception {
+    UUID memberUuid = UUID.randomUUID();
+    Authentication auth = new UsernamePasswordAuthenticationToken(memberUuid, null, List.of());
+    ContentCreateRequest request =
+        new ContentCreateRequest(InputType.URL, "제목", "https:example.com", "본문", null);
     when(contentService.createContent(any(ContentCreateRequest.class), eq(memberUuid)))
         .thenThrow(new CustomException(ContentErrorCode.INVALID_URL));
     mockMvc
