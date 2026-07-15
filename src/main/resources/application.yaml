@@ -68,3 +68,22 @@ security:
       authorization-url: https://kauth.kakao.com/oauth/authorize
       token-url: https://kauth.kakao.com/oauth/token
       user-info-url: https://kapi.kakao.com/v2/user/me
+
+content:
+  validation:
+    # 1차 방어선 가드레일 설정
+    min-length: 300
+    prompt-injection-keywords:
+      - "ignore previous"
+      - "jailbreak"
+      - "유출 시도"
+      - "system prompt"
+    # 자바 리소스 경로로 추출해 둔 badwords 파일 경로
+    badwords-ko-resource-path: "classpath:data/validation/badwords-ko.txt"
+
+    # 2차 방어선 화이트리스트 도메인 설정
+    whitelist-domains:
+      - velog.io
+      - tistory.com
+      - medium.com
+      - github.com
