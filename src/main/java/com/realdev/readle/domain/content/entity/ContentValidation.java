@@ -16,6 +16,7 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -62,4 +63,24 @@ public class ContentValidation extends BaseCreatedAtEntity {
 
   @Column(name = "validated_at")
   private LocalDateTime validatedAt;
+
+  @Builder
+  private ContentValidation(
+      Content content,
+      ValidationMethod validationMethod,
+      ValidationStatus status,
+      BigDecimal validationScore,
+      RejectReasonCode rejectReasonCode,
+      String evidenceSnippets,
+      ErrorCode errorCode,
+      LocalDateTime validatedAt) {
+    this.content = content;
+    this.validationMethod = validationMethod;
+    this.status = status;
+    this.validationScore = validationScore;
+    this.rejectReasonCode = rejectReasonCode;
+    this.evidenceSnippets = evidenceSnippets;
+    this.errorCode = errorCode;
+    this.validatedAt = validatedAt;
+  }
 }
