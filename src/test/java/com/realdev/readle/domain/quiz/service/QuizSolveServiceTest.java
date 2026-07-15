@@ -151,12 +151,8 @@ class QuizSolveServiceTest {
 
     // Ensure gradeAnswerAsync was called before the future is completed (verifying
     // concurrency/waiting)
-    try {
-      Thread.sleep(100); // Give submitAnswers thread time to hit gradeAnswerAsync
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-    }
-    verify(quizAiGradingService, times(1)).gradeAnswerAsync(eq(question2), eq("스프링 프레임워크"), any());
+    verify(quizAiGradingService, org.mockito.Mockito.timeout(1000).times(1))
+        .gradeAnswerAsync(eq(question2), eq("스프링 프레임워크"), any());
 
     // Now complete the future
     future1.complete(
