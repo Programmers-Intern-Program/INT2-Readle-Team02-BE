@@ -73,12 +73,24 @@ class WhitelistValidatorTest {
     assertThat(whitelistValidator.isEligibleForWhitelist(content)).isFalse();
   }
 
+  @Test
+  @DisplayName("URL이 null인 경우 화이트리스트 검증을 통과하지 못한다")
+  void isEligibleForWhitelist_nullUrl_returnsFalse() {
+    Content content = mockContentWithUrl(null, CrawlStatus.SUCCESS);
+    assertThat(whitelistValidator.isEligibleForWhitelist(content)).isFalse();
+  }
+
+  @Test
+  @DisplayName("URL이 공백인 경우 화이트리스트 검증을 통과하지 못한다")
+  void isEligibleForWhitelist_blankUrl_returnsFalse() {
+    Content content = mockContentWithUrl("   ", CrawlStatus.SUCCESS);
+    assertThat(whitelistValidator.isEligibleForWhitelist(content)).isFalse();
+  }
+
   private Content mockContentWithUrl(String url, CrawlStatus status) {
     Content content = org.mockito.Mockito.mock(Content.class);
     lenient().when(content.getOriginalUrl()).thenReturn(url);
-    if (url != null) {
-      lenient().when(content.getCrawlStatus()).thenReturn(status);
-    }
+    lenient().when(content.getCrawlStatus()).thenReturn(status);
     return content;
   }
 }
