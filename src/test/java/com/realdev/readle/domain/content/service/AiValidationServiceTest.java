@@ -8,8 +8,10 @@ import com.realdev.readle.domain.content.dto.response.ClaudeValidationResponse;
 import com.realdev.readle.domain.content.entity.Content;
 import com.realdev.readle.domain.content.entity.ErrorCode;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
+import com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
+import java.util.List;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -38,6 +40,26 @@ class AiValidationServiceTest {
   }
 
   // =========================================================================
+  // 헬퍼: ClaudeResponse 생성
+  // =========================================================================
+
+  /** 주어진 JSON 텍스트를 ClaudeResponse.Content[type=text]에 담아 ClaudeResponse를 반환한다. */
+  private ClaudeResponse claudeResponse(String jsonText) {
+    ClaudeResponse.Content block = new ClaudeResponse.Content();
+    block.setType("text");
+    block.setText(jsonText);
+
+    ClaudeResponse response = new ClaudeResponse();
+    response.setContent(List.of(block));
+
+    ClaudeResponse.Usage usage = new ClaudeResponse.Usage();
+    usage.setInputTokens(100);
+    usage.setOutputTokens(50);
+    response.setUsage(usage);
+    return response;
+  }
+
+  // =========================================================================
   // 1. 정상 성공 케이스
   // =========================================================================
 
@@ -50,7 +72,7 @@ class AiValidationServiceTest {
 
     String mockJson =
         "{\"validationScore\": 85, \"status\": \"PASSED\", \"rejectReasonCode\": null, \"evidenceSnippets\": null}";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(mockJson);
+    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(mockJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -79,7 +101,7 @@ class AiValidationServiceTest {
         "{\"validationScore\": 20, \"status\": \"REJECTED\","
             + " \"rejectReasonCode\": \"NOT_DEVELOPMENT_RELATED\","
             + " \"evidenceSnippets\": [\"snippet1\", \"snippet2\"]}";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(mockJson);
+    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(mockJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -112,7 +134,7 @@ class AiValidationServiceTest {
             + "{\"validationScore\": 90, \"status\": \"PASSED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}\n"
             + "```";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(fencedJson);
+    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(fencedJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -136,7 +158,7 @@ class AiValidationServiceTest {
             + "{\"validationScore\": 75, \"status\": \"PASSED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}\n"
             + "```";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(fencedJson);
+    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(fencedJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -159,16 +181,18 @@ class AiValidationServiceTest {
     Content content = Content.fromText(null, "제목", "가".repeat(350));
     when(txHelper.createPendingValidation(content)).thenReturn(200L);
 
-    when(claudeClient.getGeneratedText(anyString(), anyString()))
-        .thenReturn("잘못된 코드 텍스트")
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse("잘못된 코드 텍스트"))
         .thenReturn(
-            "{\"validationScore\": 90, \"status\": \"PASSED\", \"rejectReasonCode\": null, \"evidenceSnippets\": null}");
+            claudeResponse(
+                "{\"validationScore\": 90, \"status\": \"PASSED\","
+                    + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}"));
 
     // when
     aiValidationService.runAiValidation(content);
 
     // then
-    verify(claudeClient, times(2)).getGeneratedText(anyString(), anyString());
+    verify(claudeClient, times(2)).generateMessage(anyString(), anyString());
     verify(txHelper).updateValidationSuccess(eq(200L), any());
   }
 
@@ -182,13 +206,13 @@ class AiValidationServiceTest {
     // given
     Content content = Content.fromText(null, "제목", "가".repeat(350));
     when(txHelper.createPendingValidation(content)).thenReturn(300L);
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn("잘못된 JSON");
+    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse("잘못된 JSON"));
 
     // when
     aiValidationService.runAiValidation(content);
 
     // then
-    verify(claudeClient, times(2)).getGeneratedText(anyString(), anyString());
+    verify(claudeClient, times(2)).generateMessage(anyString(), anyString());
     verify(txHelper).updateValidationFailed(eq(300L), eq(ErrorCode.SCHEMA_INVALID));
   }
 
@@ -199,17 +223,17 @@ class AiValidationServiceTest {
     Content content = Content.fromText(null, "제목", "가".repeat(350));
     when(txHelper.createPendingValidation(content)).thenReturn(301L);
 
-    // validationScore가 null이어서 validateSchema()에서 CustomException을 던짐
     String invalidSchemaJson =
         "{\"validationScore\": null, \"status\": \"PASSED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(invalidSchemaJson);
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(invalidSchemaJson));
 
     // when
     aiValidationService.runAiValidation(content);
 
     // then
-    verify(claudeClient, times(2)).getGeneratedText(anyString(), anyString());
+    verify(claudeClient, times(2)).generateMessage(anyString(), anyString());
     verify(txHelper).updateValidationFailed(eq(301L), eq(ErrorCode.SCHEMA_INVALID));
   }
 
@@ -220,11 +244,11 @@ class AiValidationServiceTest {
     Content content = Content.fromText(null, "제목", "가".repeat(350));
     when(txHelper.createPendingValidation(content)).thenReturn(302L);
 
-    // AI가 우리 시스템 내부 상태(PENDING)를 그대로 반환한 비정상 케이스
     String invalidStatusJson =
         "{\"validationScore\": 80, \"status\": \"PENDING\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(invalidStatusJson);
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(invalidStatusJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -243,7 +267,8 @@ class AiValidationServiceTest {
     String missingReasonCodeJson =
         "{\"validationScore\": 30, \"status\": \"REJECTED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": [\"근거\"]}";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(missingReasonCodeJson);
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(missingReasonCodeJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -262,7 +287,8 @@ class AiValidationServiceTest {
     String missingSnippetsJson =
         "{\"validationScore\": 25, \"status\": \"REJECTED\","
             + " \"rejectReasonCode\": \"NOT_DEVELOPMENT_RELATED\", \"evidenceSnippets\": null}";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(missingSnippetsJson);
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(missingSnippetsJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -277,14 +303,14 @@ class AiValidationServiceTest {
     // given
     Content content = Content.fromText(null, "제목", "가".repeat(350));
     when(txHelper.createPendingValidation(content)).thenReturn(400L);
-    when(claudeClient.getGeneratedText(anyString(), anyString()))
+    when(claudeClient.generateMessage(anyString(), anyString()))
         .thenThrow(mock(RestClientResponseException.class));
 
     // when
     aiValidationService.runAiValidation(content);
 
     // then
-    verify(claudeClient, times(2)).getGeneratedText(anyString(), anyString());
+    verify(claudeClient, times(2)).generateMessage(anyString(), anyString());
     verify(txHelper).updateValidationFailed(eq(400L), eq(ErrorCode.AI_SERVICE_ERROR));
   }
 
@@ -298,14 +324,13 @@ class AiValidationServiceTest {
     SocketTimeoutException socketTimeout = new SocketTimeoutException("Read timed out");
     ResourceAccessException resourceAccessException =
         new ResourceAccessException("I/O error", socketTimeout);
-    when(claudeClient.getGeneratedText(anyString(), anyString()))
-        .thenThrow(resourceAccessException);
+    when(claudeClient.generateMessage(anyString(), anyString())).thenThrow(resourceAccessException);
 
     // when
     aiValidationService.runAiValidation(content);
 
     // then
-    verify(claudeClient, times(2)).getGeneratedText(anyString(), anyString());
+    verify(claudeClient, times(2)).generateMessage(anyString(), anyString());
     verify(txHelper).updateValidationFailed(eq(401L), eq(ErrorCode.TIMEOUT));
   }
 
@@ -318,8 +343,7 @@ class AiValidationServiceTest {
 
     ResourceAccessException resourceAccessException =
         new ResourceAccessException("Connection refused", new IOException("Connection refused"));
-    when(claudeClient.getGeneratedText(anyString(), anyString()))
-        .thenThrow(resourceAccessException);
+    when(claudeClient.generateMessage(anyString(), anyString())).thenThrow(resourceAccessException);
 
     // when
     aiValidationService.runAiValidation(content);
@@ -334,7 +358,7 @@ class AiValidationServiceTest {
     // given
     Content content = Content.fromText(null, "제목", "가".repeat(350));
     when(txHelper.createPendingValidation(content)).thenReturn(403L);
-    when(claudeClient.getGeneratedText(anyString(), anyString()))
+    when(claudeClient.generateMessage(anyString(), anyString()))
         .thenThrow(new RuntimeException("예상치 못한 오류"));
 
     // when
@@ -359,14 +383,14 @@ class AiValidationServiceTest {
     String mockJson =
         "{\"validationScore\": 88, \"status\": \"PASSED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}";
-    when(claudeClient.getGeneratedText(anyString(), anyString())).thenReturn(mockJson);
+    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(mockJson));
 
     // when
     aiValidationService.runAiValidation(content);
 
     // then: userPrompt에 extractedText가 담겨 Claude에 전달됐는지 확인
     ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-    verify(claudeClient).getGeneratedText(anyString(), userPromptCaptor.capture());
+    verify(claudeClient).generateMessage(anyString(), userPromptCaptor.capture());
     assertThat(userPromptCaptor.getValue()).contains(extractedText);
   }
 }

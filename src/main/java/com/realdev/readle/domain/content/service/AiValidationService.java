@@ -7,6 +7,7 @@ import com.realdev.readle.domain.content.entity.Content;
 import com.realdev.readle.domain.content.entity.ErrorCode;
 import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
+import com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -55,7 +56,7 @@ public class AiValidationService {
       try {
         log.info("[AI_VALIDATION] Claude API 호출 시도 ({}/{})", attempt, MAX_ATTEMPTS);
 
-        String rawText = callClaudeWithTimeout(systemPrompt, userPrompt);
+        String rawText = callClaudeWithTimeout(systemPrompt, userPrompt, validationId);
         String cleaned = stripMarkdownFence(rawText);
 
         ClaudeValidationResponse response =
@@ -92,10 +93,15 @@ public class AiValidationService {
         lastException);
   }
 
-  private String callClaudeWithTimeout(String systemPrompt, String userPrompt) {
+  private String callClaudeWithTimeout(String systemPrompt, String userPrompt, Long validationId) {
     CompletableFuture<String> future =
         CompletableFuture.supplyAsync(
-            () -> claudeClient.getGeneratedText(systemPrompt, userPrompt), validationExecutor);
+            () -> {
+              ClaudeResponse response = claudeClient.generateMessage(systemPrompt, userPrompt);
+              logTokenUsage(validationId, response);
+              return extractText(response);
+            },
+            validationExecutor);
     try {
       return future.get(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     } catch (java.util.concurrent.TimeoutException e) {
@@ -110,6 +116,30 @@ public class AiValidationService {
       }
       throw new IllegalStateException("Claude 호출 중 알 수 없는 오류", cause);
     }
+  }
+
+  private void logTokenUsage(Long validationId, ClaudeResponse response) {
+    if (response == null || response.getUsage() == null) {
+      return;
+    }
+    ClaudeResponse.Usage usage = response.getUsage();
+    log.info(
+        "[AI_VALIDATION] 토큰 사용량. Validation ID: {}, input_tokens: {}, output_tokens: {}, total: {}",
+        validationId,
+        usage.getInputTokens(),
+        usage.getOutputTokens(),
+        usage.getInputTokens() + usage.getOutputTokens());
+  }
+
+  private String extractText(ClaudeResponse response) {
+    if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+      throw new IllegalStateException("Claude API로부터 비어있는 응답을 받았습니다.");
+    }
+    return response.getContent().stream()
+        .filter(block -> "text".equals(block.getType()))
+        .map(com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse.Content::getText)
+        .findFirst()
+        .orElseThrow(() -> new IllegalStateException("Claude API 응답에 유효한 텍스트 블록이 없습니다."));
   }
 
   private void sleepBeforeRetry() {
