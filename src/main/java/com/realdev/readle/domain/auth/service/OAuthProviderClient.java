@@ -7,6 +7,7 @@ import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.realdev.readle.global.security.SecurityProperties;
 import java.util.Map;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -23,8 +24,9 @@ public class OAuthProviderClient {
   private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT =
       new ParameterizedTypeReference<>() {};
 
-  public OAuthProviderClient(RestClient.Builder restClientBuilder, SecurityProperties properties) {
-    this.restClient = restClientBuilder.build();
+  public OAuthProviderClient(
+      @Qualifier("oauthRestClient") RestClient restClient, SecurityProperties properties) {
+    this.restClient = restClient;
     this.properties = properties;
   }
 

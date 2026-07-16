@@ -40,7 +40,7 @@ class OAuthProviderClientHttpIntegrationTest {
   void setUp() {
     RestClient.Builder builder = RestClient.builder();
     server = MockRestServiceServer.bindTo(builder).build();
-    client = new OAuthProviderClient(builder, properties());
+    client = new OAuthProviderClient(builder.build(), properties());
   }
 
   @Test

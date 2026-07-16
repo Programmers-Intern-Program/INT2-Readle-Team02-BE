@@ -20,7 +20,7 @@ class OAuthProviderClientTest {
 
   @BeforeEach
   void setUp() {
-    client = new OAuthProviderClient(RestClient.builder(), properties());
+    client = new OAuthProviderClient(RestClient.builder().build(), properties());
   }
 
   @Test
