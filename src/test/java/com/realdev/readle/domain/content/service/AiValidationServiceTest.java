@@ -72,7 +72,8 @@ class AiValidationServiceTest {
 
     String mockJson =
         "{\"validationScore\": 85, \"status\": \"PASSED\", \"rejectReasonCode\": null, \"evidenceSnippets\": null}";
-    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(mockJson));
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(mockJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -101,7 +102,8 @@ class AiValidationServiceTest {
         "{\"validationScore\": 20, \"status\": \"REJECTED\","
             + " \"rejectReasonCode\": \"NOT_DEVELOPMENT_RELATED\","
             + " \"evidenceSnippets\": [\"snippet1\", \"snippet2\"]}";
-    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(mockJson));
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(mockJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -134,7 +136,8 @@ class AiValidationServiceTest {
             + "{\"validationScore\": 90, \"status\": \"PASSED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}\n"
             + "```";
-    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(fencedJson));
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(fencedJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -158,7 +161,8 @@ class AiValidationServiceTest {
             + "{\"validationScore\": 75, \"status\": \"PASSED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}\n"
             + "```";
-    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(fencedJson));
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(fencedJson));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -206,7 +210,8 @@ class AiValidationServiceTest {
     // given
     Content content = Content.fromText(null, "제목", "가".repeat(350));
     when(txHelper.createPendingValidation(content)).thenReturn(300L);
-    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse("잘못된 JSON"));
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse("잘못된 JSON"));
 
     // when
     aiValidationService.runAiValidation(content);
@@ -383,7 +388,8 @@ class AiValidationServiceTest {
     String mockJson =
         "{\"validationScore\": 88, \"status\": \"PASSED\","
             + " \"rejectReasonCode\": null, \"evidenceSnippets\": null}";
-    when(claudeClient.generateMessage(anyString(), anyString())).thenReturn(claudeResponse(mockJson));
+    when(claudeClient.generateMessage(anyString(), anyString()))
+        .thenReturn(claudeResponse(mockJson));
 
     // when
     aiValidationService.runAiValidation(content);

@@ -316,7 +316,7 @@ class ContentGuardrailServiceTest {
     when(contentRepository.findById(8L)).thenReturn(Optional.of(content));
 
     // when
-    guardrailService.markAsFailed(8L, ErrorCode.AI_SERVICE_ERROR);
+    guardrailService.markAsFailed(8L, ValidationMethod.AI, ErrorCode.AI_SERVICE_ERROR);
 
     // then
     ArgumentCaptor<ContentValidation> captor = ArgumentCaptor.forClass(ContentValidation.class);
@@ -325,6 +325,7 @@ class ContentGuardrailServiceTest {
     ContentValidation captured = captor.getValue();
     assertThat(captured.getStatus()).isEqualTo(ValidationStatus.FAILED);
     assertThat(captured.getErrorCode()).isEqualTo(ErrorCode.AI_SERVICE_ERROR);
+    assertThat(captured.getValidationMethod()).isEqualTo(ValidationMethod.AI);
   }
 
   @Test
@@ -334,7 +335,7 @@ class ContentGuardrailServiceTest {
     when(contentRepository.findById(999L)).thenReturn(Optional.empty());
 
     // when
-    guardrailService.markAsFailed(999L, ErrorCode.TIMEOUT);
+    guardrailService.markAsFailed(999L, ValidationMethod.STATIC_GUARDRAIL, ErrorCode.TIMEOUT);
 
     // then
     verify(contentValidationRepository, never()).save(any());

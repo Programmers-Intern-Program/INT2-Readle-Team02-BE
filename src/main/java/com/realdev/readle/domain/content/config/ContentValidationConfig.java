@@ -1,5 +1,7 @@
 package com.realdev.readle.domain.content.config;
 
+import com.realdev.readle.global.exception.CustomException;
+import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.vane.badwordfiltering.BadWordFiltering;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -43,12 +45,20 @@ public class ContentValidationConfig {
           log.info("[VALIDATION_CONFIG] badwords.data 사전 적재 완료 (총 {}개 단어)", count);
         }
       } else {
-        log.warn(
-            "[VALIDATION_CONFIG] badwords.data 파일을 찾을 수 없습니다. 경로: {}",
-            properties.badwordsKoResourcePath());
+        throw new CustomException(
+            GlobalErrorCode.SERVER_ERROR,
+            "[VALIDATION_CONFIG] badwords.data 파일을 찾을 수 없습니다. 경로: "
+                + properties.badwordsKoResourcePath()
+                + ".");
       }
+
     } catch (Exception e) {
-      log.error("[VALIDATION_CONFIG] badwords.data 사전 적재 중 예외 발생. 기본 필터만 적용합니다.", e);
+      log.error("[VALIDATION_CONFIG] badwords.data 사전 적재 중 예외 발생.", e);
+      if (e instanceof CustomException) {
+        throw (CustomException) e;
+      }
+      throw new CustomException(
+          GlobalErrorCode.SERVER_ERROR, "[VALIDATION_CONFIG] badwords.data 사전 적재 중 오류가 발생했습니다.", e);
     }
     return badWordFiltering;
   }

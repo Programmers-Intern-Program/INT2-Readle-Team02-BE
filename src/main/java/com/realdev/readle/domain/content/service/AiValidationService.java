@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.realdev.readle.domain.content.dto.response.ClaudeValidationResponse;
 import com.realdev.readle.domain.content.entity.Content;
 import com.realdev.readle.domain.content.entity.ErrorCode;
+import com.realdev.readle.domain.content.exception.ContentErrorCode;
 import com.realdev.readle.global.exception.CustomException;
+import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
 import com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse;
 import java.net.SocketTimeoutException;
@@ -114,7 +116,8 @@ public class AiValidationService {
       if (cause instanceof RuntimeException re) {
         throw re;
       }
-      throw new IllegalStateException("Claude 호출 중 알 수 없는 오류", cause);
+      throw new CustomException(
+          GlobalErrorCode.SERVER_ERROR, "Claude 호출 중 알 수 없는 오류가 발생했습니다.", cause);
     }
   }
 
@@ -133,13 +136,21 @@ public class AiValidationService {
 
   private String extractText(ClaudeResponse response) {
     if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
-      throw new IllegalStateException("Claude API로부터 비어있는 응답을 받았습니다.");
+      throw new CustomException(
+          ContentErrorCode.INVALID_AI_VALIDATION_RESPONSE, "Claude API로부터 비어있는 응답을 받았습니다.");
     }
-    return response.getContent().stream()
-        .filter(block -> "text".equals(block.getType()))
-        .map(com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse.Content::getText)
-        .findFirst()
-        .orElseThrow(() -> new IllegalStateException("Claude API 응답에 유효한 텍스트 블록이 없습니다."));
+    String text =
+        response.getContent().stream()
+            .filter(block -> "text".equals(block.getType()))
+            .map(com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse.Content::getText)
+            .filter(java.util.Objects::nonNull)
+            .collect(java.util.stream.Collectors.joining("\n"));
+
+    if (text.isBlank()) {
+      throw new CustomException(
+          ContentErrorCode.INVALID_AI_VALIDATION_RESPONSE, "Claude API 응답에 유효한 텍스트 블록이 없습니다.");
+    }
+    return text;
   }
 
   private void sleepBeforeRetry() {
@@ -152,16 +163,14 @@ public class AiValidationService {
 
   /** Claude가 프롬프트 지시를 어기고 코드펜스(```json ... ```)로 감싸 응답하는 경우를 방어 */
   private String stripMarkdownFence(String text) {
-    String trimmed = text.trim();
-    if (trimmed.startsWith("```json")) {
-      trimmed = trimmed.substring(7);
-    } else if (trimmed.startsWith("```")) {
-      trimmed = trimmed.substring(3);
+    if (text == null) {
+      return "";
     }
-    if (trimmed.endsWith("```")) {
-      trimmed = trimmed.substring(0, trimmed.length() - 3);
-    }
-    return trimmed.trim();
+    // 앞쪽 ```json 이나 ``` 패턴 제거 (공백 및 대소문자 무관)
+    String cleaned = text.replaceAll("(?i)^\\s*```(?:json)?\\s*", "");
+    // 뒤쪽 ``` 패턴 제거
+    cleaned = cleaned.replaceAll("\\s*```\\s*$", "");
+    return cleaned.trim();
   }
 
   private ErrorCode determineErrorCode(Throwable t) {

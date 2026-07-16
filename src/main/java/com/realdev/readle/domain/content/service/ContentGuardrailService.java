@@ -71,7 +71,7 @@ public class ContentGuardrailService {
   }
 
   @Transactional
-  public void markAsFailed(Long contentId, ErrorCode errorCode) {
+  public void markAsFailed(Long contentId, ValidationMethod validationMethod, ErrorCode errorCode) {
     contentRepository
         .findById(contentId)
         .ifPresent(
@@ -79,7 +79,7 @@ public class ContentGuardrailService {
               ContentValidation validation =
                   ContentValidation.builder()
                       .content(content)
-                      .validationMethod(ValidationMethod.STATIC_GUARDRAIL)
+                      .validationMethod(validationMethod)
                       .build();
 
               validation.markFailed(errorCode);

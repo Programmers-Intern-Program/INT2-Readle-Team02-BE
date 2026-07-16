@@ -1,6 +1,5 @@
 package com.realdev.readle.domain.content.service;
 
-import com.realdev.readle.domain.content.entity.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -21,8 +20,10 @@ public class ContentValidationEventListener {
     try {
       contentValidationService.validateContent(event.contentId());
     } catch (Exception e) {
-      log.error("[VALIDATION_EVENT] 콘텐츠 검증 진행 중 예외 발생. Content ID: {}", event.contentId(), e);
-      contentValidationService.markAsFailed(event.contentId(), ErrorCode.UNKNOWN_ERROR);
+      log.error(
+          "[VALIDATION_EVENT] 콘텐츠 검증 비동기 파이프라인 최종 에러 발생 (세부 단계별 실패 이력 확인 필요). Content ID: {}",
+          event.contentId(),
+          e);
     }
   }
 }
