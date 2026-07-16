@@ -2,6 +2,7 @@ package com.realdev.readle.domain.content.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.realdev.readle.domain.content.config.ContentValidationProperties;
 import com.realdev.readle.domain.content.dto.response.ClaudeValidationResponse;
 import com.realdev.readle.domain.content.entity.Content;
 import com.realdev.readle.domain.content.entity.ErrorCode;
@@ -10,11 +11,9 @@ import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
 import com.realdev.readle.global.infrastructure.ai.dto.ClaudeResponse;
-import java.net.SocketTimeoutException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -27,13 +26,10 @@ import org.springframework.web.client.RestClientResponseException;
 @RequiredArgsConstructor
 public class AiValidationService {
 
-  private static final int MAX_ATTEMPTS = 2;
-  private static final long RETRY_DELAY_MS = 1000;
-  private static final long CALL_TIMEOUT_SECONDS = 5;
-
   private final AiValidationTxHelper txHelper;
   private final ClaudeClient claudeClient;
   private final ObjectMapper objectMapper;
+  private final ContentValidationProperties properties;
 
   @Qualifier("claudeCallExecutor") private final Executor claudeCallExecutor;
 
@@ -54,9 +50,9 @@ public class AiValidationService {
 
     Throwable lastException = null;
 
-    for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    for (int attempt = 1; attempt <= properties.maxAttempts(); attempt++) {
       try {
-        log.info("[AI_VALIDATION] Claude API 호출 시도 ({}/{})", attempt, MAX_ATTEMPTS);
+        log.info("[AI_VALIDATION] Claude API 호출 시도 ({}/{})", attempt, properties.maxAttempts());
 
         String rawText = callClaudeWithTimeout(systemPrompt, userPrompt, validationId);
         String cleaned = stripMarkdownFence(rawText);
@@ -81,11 +77,11 @@ public class AiValidationService {
         log.warn(
             "[AI_VALIDATION] AI 검증 처리 실패 (시도: {}/{}). 사유: {}",
             attempt,
-            MAX_ATTEMPTS,
+            properties.maxAttempts(),
             e.getMessage());
         lastException = e;
 
-        if (attempt < MAX_ATTEMPTS) {
+        if (attempt < properties.maxAttempts()) {
           sleepBeforeRetry();
         }
       }
@@ -111,7 +107,7 @@ public class AiValidationService {
             claudeCallExecutor);
 
     try {
-      return future.get(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+      return future.get(properties.callTimeoutSeconds(), TimeUnit.SECONDS);
     } catch (InterruptedException e) {
       future.cancel(true);
       Thread.currentThread().interrupt();
@@ -141,10 +137,8 @@ public class AiValidationService {
       throw new CustomException(
           GlobalErrorCode.SERVER_ERROR, "Claude 호출 중 알 수 없는 오류가 발생했습니다.", cause);
     } catch (Exception e) {
-      throw new CustomException(
-          GlobalErrorCode.SERVER_ERROR, "Claude 호출 중 알 수 없는 오류가 발생했습니다.", e);
+      throw new CustomException(GlobalErrorCode.SERVER_ERROR, "Claude 호출 중 알 수 없는 오류가 발생했습니다.", e);
     }
-
   }
 
   private void logTokenUsage(Long validationId, ClaudeResponse response) {
@@ -181,7 +175,7 @@ public class AiValidationService {
 
   private void sleepBeforeRetry() {
     try {
-      Thread.sleep(RETRY_DELAY_MS);
+      Thread.sleep(properties.retryDelayMs());
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
     }

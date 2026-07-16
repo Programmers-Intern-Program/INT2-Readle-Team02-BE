@@ -18,7 +18,7 @@ public class ContentValidationAsyncConfig {
     executor.setMaxPoolSize(5);
     executor.setQueueCapacity(100);
     executor.setThreadNamePrefix("valid-thread-");
-    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
     executor.initialize();
     return executor;
   }
@@ -30,9 +30,8 @@ public class ContentValidationAsyncConfig {
     executor.setMaxPoolSize(10);
     executor.setQueueCapacity(50);
     executor.setThreadNamePrefix("claude-thread-");
-    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
     executor.initialize();
     return executor;
   }
-
 }

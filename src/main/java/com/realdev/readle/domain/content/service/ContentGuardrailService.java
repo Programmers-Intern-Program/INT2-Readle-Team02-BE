@@ -8,9 +8,11 @@ import com.realdev.readle.global.exception.CustomException;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class ContentGuardrailService {
@@ -74,7 +76,7 @@ public class ContentGuardrailService {
   public void markAsFailed(Long contentId, ValidationMethod validationMethod, ErrorCode errorCode) {
     contentRepository
         .findById(contentId)
-        .ifPresent(
+        .ifPresentOrElse(
             content -> {
               ContentValidation validation =
                   ContentValidation.builder()
@@ -85,7 +87,8 @@ public class ContentGuardrailService {
               validation.markFailed(errorCode);
 
               contentValidationRepository.save(validation);
-            });
+            },
+            () -> log.warn("[GUARDRAIL] 검증 실패 기록 중 컨텐츠 조회 실패. contentId={}", contentId));
   }
 
   public record GuardrailResult(boolean needsAiValidation, Content content) {

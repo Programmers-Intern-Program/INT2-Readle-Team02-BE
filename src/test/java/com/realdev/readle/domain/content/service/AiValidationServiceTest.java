@@ -24,19 +24,24 @@ class AiValidationServiceTest {
 
   private AiValidationTxHelper txHelper;
   private ClaudeClient claudeClient;
+  private com.realdev.readle.domain.content.config.ContentValidationProperties properties;
   private AiValidationService aiValidationService;
 
   @BeforeEach
   void setUp() {
     txHelper = mock(AiValidationTxHelper.class);
     claudeClient = mock(ClaudeClient.class);
+    properties = mock(com.realdev.readle.domain.content.config.ContentValidationProperties.class);
+    when(properties.maxAttempts()).thenReturn(2);
+    when(properties.retryDelayMs()).thenReturn(100L);
+    when(properties.callTimeoutSeconds()).thenReturn(5L);
     ObjectMapper objectMapper = new ObjectMapper();
 
     // 동기식 실행을 보장하여 비동기 스레드 풀 모킹
     Executor syncExecutor = Runnable::run;
 
     aiValidationService =
-        new AiValidationService(txHelper, claudeClient, objectMapper, syncExecutor);
+        new AiValidationService(txHelper, claudeClient, objectMapper, properties, syncExecutor);
   }
 
   // =========================================================================

@@ -4,7 +4,7 @@
 -- MySQL은 제약 조건을 직접 MODIFY할 수 없으므로 기존 제약을 DROP 후 재생성한다.
 
 ALTER TABLE content_validation
-DROP CONSTRAINT chk_content_validation_error_code;
+    DROP CONSTRAINT chk_content_validation_error_code;
 
 ALTER TABLE content_validation
     ADD CONSTRAINT chk_content_validation_error_code

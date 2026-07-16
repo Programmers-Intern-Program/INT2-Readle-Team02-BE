@@ -26,7 +26,6 @@ public enum ContentErrorCode implements ErrorCode {
   AI_VALIDATION_TIMEOUT(HttpStatus.INTERNAL_SERVER_ERROR, "AI 검증 요청 시간이 초과되었습니다."),
   AI_VALIDATION_SERVICE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "AI 검증 서비스 연동 중 오류가 발생했습니다.");
 
-
   private final HttpStatus status;
   private final String message;
 

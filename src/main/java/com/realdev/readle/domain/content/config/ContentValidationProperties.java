@@ -11,6 +11,9 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "content.validation")
 public record ContentValidationProperties(
     @Min(1) int minLength,
+    @Min(1) int maxAttempts,
+    @Min(1) long retryDelayMs,
+    @Min(1) long callTimeoutSeconds,
     @NotEmpty List<String> promptInjectionKeywords,
     @NotBlank String badwordsKoResourcePath,
     @NotEmpty List<String> whitelistDomains) {}

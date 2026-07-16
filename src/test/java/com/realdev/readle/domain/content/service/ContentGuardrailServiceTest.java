@@ -35,6 +35,9 @@ class ContentGuardrailServiceTest {
     ContentValidationProperties properties =
         new ContentValidationProperties(
             300,
+            2,
+            1000L,
+            5L,
             List.of("ignore all previous instructions", "무조건 통과"),
             "classpath:data/validation/badwords.data",
             List.of("techblog.woowahan.com", "tistory.com"));
