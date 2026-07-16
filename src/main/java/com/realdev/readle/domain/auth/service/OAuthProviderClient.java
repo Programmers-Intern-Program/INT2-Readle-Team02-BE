@@ -63,7 +63,14 @@ public class OAuthProviderClient {
   }
 
   public void requireConfigured(OAuthProvider provider) {
-    requireConfigured(settings(provider));
+    try {
+      requireConfigured(settings(provider));
+    } catch (CustomException exception) {
+      throw exception;
+    } catch (RuntimeException exception) {
+      log.warn("OAuth provider={} exception={}", provider, exception.getClass().getSimpleName());
+      throw failure();
+    }
   }
 
   public OAuthProfile exchange(

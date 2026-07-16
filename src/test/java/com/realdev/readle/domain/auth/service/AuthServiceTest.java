@@ -2,7 +2,11 @@ package com.realdev.readle.domain.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -57,6 +61,19 @@ class AuthServiceTest {
             "https://api.readle.test/api/auth/google/callback");
     assertThat(result.authorizationUrl()).isEqualTo("https://accounts.example.com/authorize");
     assertThat(result.state()).isEqualTo("state-abc");
+  }
+
+  @Test
+  void startThrowsWhenProviderNotConfiguredAndSkipsAuthorizationSetup() {
+    CustomException expected = new CustomException(GlobalErrorCode.OAUTH_AUTHORIZATION_FAILED);
+    doThrow(expected).when(providerClient).requireConfigured(OAuthProvider.GOOGLE);
+
+    assertThatThrownBy(() -> authService.start("GoOgLe", "/library")).isSameAs(expected);
+
+    verify(providerClient).requireConfigured(OAuthProvider.GOOGLE);
+    verify(stateService, never()).create(any(), anyString());
+    verify(providerClient, never()).authorizationUrl(any(), anyString(), anyString(), anyString());
+    verify(properties, never()).backendOrigin();
   }
 
   @Test
