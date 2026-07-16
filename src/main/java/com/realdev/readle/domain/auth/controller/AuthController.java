@@ -2,6 +2,7 @@ package com.realdev.readle.domain.auth.controller;
 
 import com.realdev.readle.domain.auth.OAuthStateCookie;
 import com.realdev.readle.domain.auth.RefreshTokenCookie;
+import com.realdev.readle.domain.auth.dto.response.AccessTokenResponse;
 import com.realdev.readle.domain.auth.service.AuthService;
 import com.realdev.readle.domain.auth.service.RefreshTokenService;
 import com.realdev.readle.domain.member.entity.Member;
@@ -13,7 +14,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -82,9 +82,9 @@ public class AuthController {
 
   @Operation(summary = "Access Token 갱신", description = "리프레시 토큰 쿠키로 액세스 토큰을 발급합니다.")
   @PostMapping("/auth/refresh")
-  public ApiResponse<Map<String, String>> refresh(
+  public ApiResponse<AccessTokenResponse> refresh(
       @CookieValue(value = RefreshTokenCookie.NAME, required = false) String refreshToken) {
-    return new ApiResponse<>(Map.of("accessToken", refreshTokenService.refresh(refreshToken)));
+    return new ApiResponse<>(new AccessTokenResponse(refreshTokenService.refresh(refreshToken)));
   }
 
   @Operation(summary = "로그아웃", description = "현재 리프레시 토큰을 폐기하고 쿠키를 삭제합니다.")
