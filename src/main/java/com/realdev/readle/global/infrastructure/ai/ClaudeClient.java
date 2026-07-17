@@ -42,7 +42,8 @@ public class ClaudeClient {
 
   // 기본 모델(properties.getModel())을 사용하는 기본 버전
   private ClaudeResponse generateMessage(String systemPrompt, String userPrompt) {
-    return generateMessageInternal(claudeRestClient, properties.getModel(), systemPrompt, userPrompt);
+    return generateMessageInternal(
+        claudeRestClient, properties.getModel(), systemPrompt, userPrompt);
   }
 
   // 채점 전용 (3초 타임아웃 클라이언트 사용, 자체 재시도 없음)

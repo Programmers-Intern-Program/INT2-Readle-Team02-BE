@@ -47,7 +47,10 @@ public class QuizGenerationService {
     ContentValidation validation =
         contentValidationRepository
             .findByIdWithContent(sourceValidationId)
-            .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
+            .orElseThrow(
+                () ->
+                    new CustomException(
+                        QuizErrorCode.SOURCE_VALIDATION_NOT_FOUND, "존재하지 않는 검증 ID입니다."));
 
     // Validation 상태 분기: PASSED만 허용하는 allow-list로 변경
     if (validation.getStatus() != ValidationStatus.PASSED) {
@@ -76,7 +79,10 @@ public class QuizGenerationService {
               ContentValidation managedValidation =
                   contentValidationRepository
                       .findByIdWithContent(sourceValidationId)
-                      .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 검증 ID입니다."));
+                      .orElseThrow(
+                          () ->
+                              new CustomException(
+                                  QuizErrorCode.SOURCE_VALIDATION_NOT_FOUND, "존재하지 않는 검증 ID입니다."));
 
               QuizSet newQuizSet;
               try {
