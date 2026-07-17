@@ -47,7 +47,7 @@ public class ContentService {
     // 1. 회원 조회
     Member member =
         memberRepository
-            .findByUuid(memberUuid.toString())
+            .findByUuid(memberUuid)
             .orElseThrow(() -> new CustomException(MemberErrorCode.MEMBER_NOT_FOUND));
 
     // 2. 저장
@@ -93,6 +93,8 @@ public class ContentService {
           || (request.extractedText() != null && !request.extractedText().isBlank())) {
         throw new CustomException(ContentErrorCode.UNNECESSARY_URL_INFO);
       }
+    } else {
+      throw new CustomException(ContentErrorCode.INVALID_INPUT_TYPE);
     }
   }
 

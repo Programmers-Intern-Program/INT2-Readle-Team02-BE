@@ -270,6 +270,35 @@ class ContentServiceTest {
   }
 
   @Test
+  @DisplayName("inputType=TEXT이고 text가 빈 문자열이면 TEXT_REQUIRED 예외가 발생한다")
+  void createContent_textType_emptyText_throwsTextRequired() {
+    String memberUuid = UUID.randomUUID().toString();
+    ContentCreateRequest request = new ContentCreateRequest(InputType.TEXT, "제목", null, null, "");
+
+    assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.TEXT_REQUIRED);
+
+    verify(memberRepository, never()).findByUuid(any());
+  }
+
+  @Test
+  @DisplayName("inputType=TEXT이고 text가 공백 문자열이면 TEXT_REQUIRED 예외가 발생한다")
+  void createContent_textType_blankText_throwsTextRequired() {
+    String memberUuid = UUID.randomUUID().toString();
+    ContentCreateRequest request =
+        new ContentCreateRequest(InputType.TEXT, "제목", null, null, "   ");
+
+    assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.TEXT_REQUIRED);
+
+    verify(memberRepository, never()).findByUuid(any());
+  }
+
+  @Test
   @DisplayName("inputType=URL이고 extractedText가 null이면 MISSING_EXTRACTED_TEXT 예외가 발생한다")
   void createContent_urlType_nullExtractedText_throwsMissingExtractedText() {
     String memberUuid = UUID.randomUUID().toString();
