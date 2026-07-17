@@ -1,5 +1,7 @@
 package com.realdev.readle.domain.quiz.entity;
 
+import com.realdev.readle.global.exception.CustomException;
+import com.realdev.readle.global.exception.GlobalErrorCode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -14,8 +16,6 @@ import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import com.realdev.readle.global.exception.CustomException;
-import com.realdev.readle.global.exception.GlobalErrorCode;
 
 @Entity
 @Table(
@@ -96,7 +96,8 @@ public class QuizAnswer {
       QuizQuestion quizQuestion,
       QuizChoice submittedChoice,
       Boolean isCorrect) {
-    if (submittedChoice == null || !submittedChoice.getQuizQuestion().getId().equals(quizQuestion.getId())) {
+    if (submittedChoice == null
+        || !submittedChoice.getQuizQuestion().getId().equals(quizQuestion.getId())) {
       throw new CustomException(GlobalErrorCode.INVALID_INPUT, "선택한 답안이 해당 문제에 속하지 않습니다.");
     }
     return new QuizAnswer(

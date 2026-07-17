@@ -190,7 +190,12 @@ public class QuizGenerationService {
               }
             }
 
-            activeQuizSet.complete(orderNo - 1);
+            int generatedQuestionCount = orderNo - 1;
+            if (generatedQuestionCount < 1) {
+              throw new CustomException(
+                  QuizErrorCode.QUIZ_GENERATION_FAILED, "AI가 생성한 퀴즈 문항이 없습니다.");
+            }
+            activeQuizSet.complete(generatedQuestionCount);
             return QuizCreateResponse.from(activeQuizSet);
           });
 

@@ -1,5 +1,7 @@
 package com.realdev.readle.domain.quiz.entity;
 
+import com.realdev.readle.global.exception.CustomException;
+import com.realdev.readle.global.exception.GlobalErrorCode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -16,8 +18,6 @@ import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import com.realdev.readle.global.exception.CustomException;
-import com.realdev.readle.global.exception.GlobalErrorCode;
 
 @Entity
 @Table(
