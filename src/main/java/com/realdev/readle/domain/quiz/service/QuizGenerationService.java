@@ -16,6 +16,7 @@ import com.realdev.readle.domain.quiz.exception.QuizErrorCode;
 import com.realdev.readle.domain.quiz.repository.QuizChoiceRepository;
 import com.realdev.readle.domain.quiz.repository.QuizQuestionRepository;
 import com.realdev.readle.domain.quiz.repository.QuizSetRepository;
+import com.realdev.readle.domain.tag.service.TagService;
 import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.realdev.readle.global.infrastructure.ai.ClaudeClient;
@@ -39,6 +40,7 @@ public class QuizGenerationService {
   private final ClaudeClient claudeClient;
   private final PromptLoader promptLoader;
   private final ObjectMapper objectMapper;
+  private final TagService tagService;
 
   private final TransactionTemplate transactionTemplate;
 
@@ -196,6 +198,8 @@ public class QuizGenerationService {
                   QuizErrorCode.QUIZ_GENERATION_FAILED, "AI가 생성한 퀴즈 문항이 없습니다.");
             }
             activeQuizSet.complete(generatedQuestionCount);
+            tagService.saveContentTags(activeQuizSet.getContent(), parsedResponse.getTags());
+
             return QuizCreateResponse.from(activeQuizSet);
           });
 
