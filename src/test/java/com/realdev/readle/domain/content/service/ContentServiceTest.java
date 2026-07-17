@@ -441,9 +441,9 @@ class ContentServiceTest {
     ContentCreateRequest request = new ContentCreateRequest(null, "제목", null, null, null);
 
     assertThatThrownBy(() -> contentService.createContent(request, memberUuid))
-            .isInstanceOf(CustomException.class)
-            .extracting("errorCode")
-            .isEqualTo(ContentErrorCode.INVALID_INPUT_TYPE);
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.INVALID_INPUT_TYPE);
 
     verify(memberRepository, never()).findByUuid(any());
   }
