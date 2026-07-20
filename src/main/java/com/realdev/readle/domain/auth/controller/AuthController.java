@@ -141,7 +141,9 @@ public class AuthController {
   }
 
   private String memberUuidOrNull(Authentication authentication) {
-    if (authentication == null || authentication instanceof AnonymousAuthenticationToken) {
+    if (authentication == null
+        || !authentication.isAuthenticated()
+        || authentication instanceof AnonymousAuthenticationToken) {
       return null;
     }
     Object principal = authentication.getPrincipal();

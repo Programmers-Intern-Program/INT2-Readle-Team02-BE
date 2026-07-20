@@ -153,7 +153,9 @@ class AuthControllerTest {
             "https://example.com/profile.png");
     ReflectionTestUtils.setField(member, "uuid", "member-uuid");
     when(authService.currentMember("member-uuid")).thenReturn(member);
-    Authentication authentication = new UsernamePasswordAuthenticationToken("member-uuid", null);
+    Authentication authentication =
+        new UsernamePasswordAuthenticationToken(
+            "member-uuid", null, AuthorityUtils.createAuthorityList("ROLE_USER"));
 
     mockMvc
         .perform(
@@ -186,6 +188,17 @@ class AuthControllerTest {
   }
 
   @Test
+  void currentUserRejectsUnauthenticatedIdentity() {
+    Authentication authentication = new UsernamePasswordAuthenticationToken("member-uuid", null);
+    AuthController controller = new AuthController(authService, refreshTokenService, properties);
+
+    assertThatThrownBy(() -> controller.currentUser(authentication))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(GlobalErrorCode.UNAUTHORIZED);
+  }
+
+  @Test
   void sessionReportsUnauthenticatedNonAnonymousIdentityAsUnauthenticated() {
     Authentication authentication = new UsernamePasswordAuthenticationToken("member-uuid", null);
     MockHttpServletRequest request = new MockHttpServletRequest();
@@ -204,9 +217,20 @@ class AuthControllerTest {
   @Test
   void logoutForwardsAuthenticatedPrincipalToRefreshTokenService() {
     new AuthController(authService, refreshTokenService, properties)
-        .logout(new UsernamePasswordAuthenticationToken("member-uuid", null), "refresh-token");
+        .logout(
+            new UsernamePasswordAuthenticationToken(
+                "member-uuid", null, AuthorityUtils.createAuthorityList("ROLE_USER")),
+            "refresh-token");
 
     verify(refreshTokenService).revoke("refresh-token", "member-uuid");
+  }
+
+  @Test
+  void logoutRevokesRefreshTokenWithoutUnauthenticatedPrincipal() {
+    new AuthController(authService, refreshTokenService, properties)
+        .logout(new UsernamePasswordAuthenticationToken("member-uuid", null), "refresh-token");
+
+    verify(refreshTokenService).revoke("refresh-token", null);
   }
 
   @Test
