@@ -64,7 +64,7 @@ public class ContentService {
     return new ContentCreateResponse(saved.getId(), ValidationStatus.PENDING);
   }
 
-  @Transactional
+  @Transactional(readOnly = true)
   public ContentValidationResponse getValidationResult(Long contentId, String memberUuid) {
     validateAuthentication(memberUuid);
 

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.realdev.readle.domain.content.dto.request.ContentCreateRequest;
 import com.realdev.readle.domain.content.dto.response.ContentCreateResponse;
+import com.realdev.readle.domain.content.dto.response.ContentValidationResponse;
 import com.realdev.readle.domain.content.entity.Content;
 import com.realdev.readle.domain.content.entity.CrawlStatus;
 import com.realdev.readle.domain.content.entity.InputType;
@@ -19,8 +20,14 @@ import com.realdev.readle.domain.content.repository.ContentValidationRepository;
 import com.realdev.readle.domain.member.entity.Member;
 import com.realdev.readle.domain.member.exception.MemberErrorCode;
 import com.realdev.readle.domain.member.repository.MemberRepository;
+import com.realdev.readle.domain.content.entity.ContentValidation;
+import com.realdev.readle.domain.content.entity.ErrorCode;
+import com.realdev.readle.domain.content.entity.RejectReasonCode;
+import com.realdev.readle.domain.content.entity.ValidationMethod;
 import com.realdev.readle.global.exception.CustomException;
 import com.realdev.readle.global.exception.GlobalErrorCode;
+
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -516,5 +523,113 @@ class ContentServiceTest {
         .isInstanceOf(CustomException.class)
         .extracting("errorCode")
         .isEqualTo(ContentErrorCode.CONTENT_VALIDATION_NOT_FOUND);
+  }
+
+  @Test
+  @DisplayName("PENDING 상태인 경우 validatedAt은 null로 반환된다")
+  void getValidationResult_pendingState() {
+    String memberUuid = UUID.randomUUID().toString();
+    Member owner = org.mockito.Mockito.mock(Member.class);
+    when(owner.getUuid()).thenReturn(memberUuid);
+    Content content = org.mockito.Mockito.mock(Content.class);
+    when(content.getMember()).thenReturn(owner);
+
+    ContentValidation validation = ContentValidation.builder()
+        .status(ValidationStatus.PENDING)
+        .validationMethod(ValidationMethod.AI)
+        .validatedAt(LocalDateTime.now()) // 강제로 세팅해도 null이어야 함
+        .build();
+
+    when(contentRepository.findById(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    ContentValidationResponse response = contentService.getValidationResult(1L, memberUuid);
+
+    assertThat(response.status()).isEqualTo(ValidationStatus.PENDING);
+    assertThat(response.validatedAt()).isNull();
+    assertThat(response.bypassAvailable()).isFalse();
+  }
+
+  @Test
+  @DisplayName("REJECTED + AI 방식인 경우 bypassAvailable은 true를 반환한다")
+  void getValidationResult_rejectedAiState() {
+    String memberUuid = UUID.randomUUID().toString();
+    Member owner = org.mockito.Mockito.mock(Member.class);
+    when(owner.getUuid()).thenReturn(memberUuid);
+    Content content = org.mockito.Mockito.mock(Content.class);
+    when(content.getMember()).thenReturn(owner);
+
+    ContentValidation validation = ContentValidation.builder()
+        .status(ValidationStatus.REJECTED)
+        .validationMethod(ValidationMethod.AI)
+        .rejectReasonCode(RejectReasonCode.CONTENT_TOO_SHORT)
+        .validatedAt(LocalDateTime.now())
+        .build();
+
+    when(contentRepository.findById(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    ContentValidationResponse response = contentService.getValidationResult(1L, memberUuid);
+
+    assertThat(response.status()).isEqualTo(ValidationStatus.REJECTED);
+    assertThat(response.bypassAvailable()).isTrue();
+    assertThat(response.errorCode()).isEqualTo("CONTENT_TOO_SHORT");
+    assertThat(response.message()).isEqualTo("분석하기에 텍스트 내용이 너무 짧습니다. 충분한 길이의 텍스트를 입력해 주세요.");
+  }
+
+  @Test
+  @DisplayName("REJECTED + STATIC_GUARDRAIL 방식인 경우 bypassAvailable은 false를 반환한다")
+  void getValidationResult_rejectedNonAiState() {
+    String memberUuid = UUID.randomUUID().toString();
+    Member owner = org.mockito.Mockito.mock(Member.class);
+    when(owner.getUuid()).thenReturn(memberUuid);
+    Content content = org.mockito.Mockito.mock(Content.class);
+    when(content.getMember()).thenReturn(owner);
+
+    ContentValidation validation = ContentValidation.builder()
+        .status(ValidationStatus.REJECTED)
+        .validationMethod(ValidationMethod.STATIC_GUARDRAIL)
+        .rejectReasonCode(RejectReasonCode.BAD_WORD)
+        .validatedAt(LocalDateTime.now())
+        .build();
+
+    when(contentRepository.findById(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    ContentValidationResponse response = contentService.getValidationResult(1L, memberUuid);
+
+    assertThat(response.status()).isEqualTo(ValidationStatus.REJECTED);
+    assertThat(response.bypassAvailable()).isFalse();
+  }
+
+  @Test
+  @DisplayName("FAILED 상태인 경우 errorCode와 message가 정확히 매핑된다")
+  void getValidationResult_failedState() {
+    String memberUuid = UUID.randomUUID().toString();
+    Member owner = org.mockito.Mockito.mock(Member.class);
+    when(owner.getUuid()).thenReturn(memberUuid);
+    Content content = org.mockito.Mockito.mock(Content.class);
+    when(content.getMember()).thenReturn(owner);
+
+    ContentValidation validation = ContentValidation.builder()
+        .status(ValidationStatus.FAILED)
+        .validationMethod(ValidationMethod.AI)
+        .errorCode(ErrorCode.AI_SERVICE_ERROR)
+        .validatedAt(LocalDateTime.now())
+        .build();
+
+    when(contentRepository.findById(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    ContentValidationResponse response = contentService.getValidationResult(1L, memberUuid);
+
+    assertThat(response.status()).isEqualTo(ValidationStatus.FAILED);
+    assertThat(response.bypassAvailable()).isFalse();
+    assertThat(response.errorCode()).isEqualTo("AI_SERVICE_ERROR");
+    assertThat(response.message()).isEqualTo("AI 검증 서비스에 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   }
 }
