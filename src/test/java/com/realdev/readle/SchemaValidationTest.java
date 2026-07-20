@@ -2,7 +2,14 @@ package com.realdev.readle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.DriverManager;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.UUID;
 import javax.sql.DataSource;
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -45,6 +52,86 @@ class SchemaValidationTest {
       assertThat(returnTo.getInt("COLUMN_SIZE")).isEqualTo(2048);
       assertThat(email.next()).isTrue();
       assertThat(email.getInt("NULLABLE")).isEqualTo(java.sql.DatabaseMetaData.columnNullable);
+    }
+  }
+
+  @Test
+  @DisplayName("V2 migrates V1 member rows without changing member columns")
+  void v2PreservesV1MemberSchemaAndData() throws Exception {
+    var url =
+        "jdbc:h2:mem:schema-validation-" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1";
+    flyway(url, "1").migrate();
+    var v1MemberColumns = memberColumnSnapshot(url);
+    insertMember(url, "null-email", null);
+    insertMember(url, "present-email", "present@example.com");
+
+    flyway(url, "2").migrate();
+
+    assertThat(memberColumnSnapshot(url)).isEqualTo(v1MemberColumns);
+    assertThat(memberEmails(url)).containsExactly(null, "present@example.com");
+  }
+
+  private Flyway flyway(String url, String target) {
+    return Flyway.configure()
+        .dataSource(url, "sa", "")
+        .target(MigrationVersion.fromVersion(target))
+        .load();
+  }
+
+  private List<MemberColumn> memberColumnSnapshot(String url) throws Exception {
+    try (var connection = DriverManager.getConnection(url, "sa", "");
+        var columns = connection.getMetaData().getColumns(null, null, "MEMBER", null)) {
+      var snapshot = new ArrayList<MemberColumn>();
+      while (columns.next()) {
+        snapshot.add(
+            new MemberColumn(
+                columns.getString("COLUMN_NAME"),
+                columns.getInt("DATA_TYPE"),
+                columns.getString("TYPE_NAME"),
+                columns.getInt("COLUMN_SIZE"),
+                columns.getInt("NULLABLE"),
+                columns.getString("COLUMN_DEF"),
+                columns.getInt("ORDINAL_POSITION")));
+      }
+      snapshot.sort(Comparator.comparingInt(MemberColumn::ordinalPosition));
+      return snapshot;
+    }
+  }
+
+  private record MemberColumn(
+      String name,
+      int jdbcType,
+      String typeName,
+      int columnSize,
+      int nullable,
+      String defaultValue,
+      int ordinalPosition) {}
+
+  private void insertMember(String url, String oauthId, String email) throws Exception {
+    var sql =
+        """
+        INSERT INTO member (uuid, oauth_provider, oauth_id, email, nickname, created_at, updated_at)
+        VALUES (?, 'GOOGLE', ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """;
+    try (var connection = DriverManager.getConnection(url, "sa", "");
+        var statement = connection.prepareStatement(sql)) {
+      statement.setString(1, UUID.randomUUID().toString());
+      statement.setString(2, oauthId);
+      statement.setString(3, email);
+      statement.setString(4, oauthId);
+      statement.executeUpdate();
+    }
+  }
+
+  private List<String> memberEmails(String url) throws Exception {
+    try (var connection = DriverManager.getConnection(url, "sa", "");
+        var statement = connection.prepareStatement("SELECT email FROM member ORDER BY oauth_id");
+        var rows = statement.executeQuery()) {
+      var emails = new ArrayList<String>();
+      while (rows.next()) {
+        emails.add(rows.getString("email"));
+      }
+      return emails;
     }
   }
 }
