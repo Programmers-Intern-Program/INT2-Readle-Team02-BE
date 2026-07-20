@@ -294,6 +294,7 @@ public class QuizSolveService {
     List<QuizAnswer> quizAnswers =
         quizAnswerRepository.findByQuizAttemptIdWithQuestionAndChoice(attemptId);
 
+    Long quizSetId = quizAttempt.getQuizSet().getId();
     String title = quizAttempt.getQuizSet().getContent().getTitle();
     Long contentId = quizAttempt.getQuizSet().getContent().getId();
     List<String> tags =
@@ -301,7 +302,8 @@ public class QuizSolveService {
             .map(ct -> ct.getTag().getName())
             .toList();
 
-    return QuizAttemptResultResponse.from(quizResult, quizAnswers, title, tags);
+    return QuizAttemptResultResponse.from(
+        quizResult, quizAnswers, title, tags, quizSetId, attemptId);
   }
 
   private boolean isStaticMatch(String correct, String submitted) {

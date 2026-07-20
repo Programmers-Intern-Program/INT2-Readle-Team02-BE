@@ -11,6 +11,8 @@ import lombok.Getter;
 @Getter
 @Builder
 public class QuizAttemptResultResponse {
+  private final Long quizSetId;
+  private final Long attemptId;
   private final String title;
   private final List<String> tags;
   private final BigDecimal accuracyRate;
@@ -55,10 +57,17 @@ public class QuizAttemptResultResponse {
   }
 
   public static QuizAttemptResultResponse from(
-      QuizResult result, List<QuizAnswer> answers, String title, List<String> tags) {
+      QuizResult result,
+      List<QuizAnswer> answers,
+      String title,
+      List<String> tags,
+      Long quizSetId,
+      Long attemptId) {
     List<QuestionResult> resultList = answers.stream().map(QuestionResult::from).toList();
 
     return QuizAttemptResultResponse.builder()
+        .quizSetId(quizSetId)
+        .attemptId(attemptId)
         .title(title)
         .tags(tags != null ? tags : List.of())
         .accuracyRate(result.getAccuracyRate())

@@ -113,6 +113,8 @@ class QuizSolveControllerTest {
 
     QuizAttemptResultResponse mockResponse =
         QuizAttemptResultResponse.builder()
+            .quizSetId(201L)
+            .attemptId(601L)
             .title("Spring @Transactional 심층 이해")
             .tags(List.of("spring", "jpa"))
             .accuracyRate(new BigDecimal("100.00"))
@@ -128,6 +130,8 @@ class QuizSolveControllerTest {
     mockMvc
         .perform(get("/api/quizzes/attempts/601/result").with(authentication(auth)))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.quizSetId").value(201))
+        .andExpect(jsonPath("$.attemptId").value(601))
         .andExpect(jsonPath("$.title").value("Spring @Transactional 심층 이해"))
         .andExpect(jsonPath("$.tags[0]").value("spring"))
         .andExpect(jsonPath("$.accuracyRate").value(100.0))

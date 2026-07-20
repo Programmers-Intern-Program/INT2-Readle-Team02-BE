@@ -81,6 +81,7 @@ class QuizSolveServiceTest {
 
     quizSet = mock(QuizSet.class);
     ReflectionTestUtils.setField(quizSet, "id", 100L);
+    lenient().when(quizSet.getId()).thenReturn(100L);
     lenient().when(quizSet.getContent()).thenReturn(content);
 
     quizAttempt = mock(QuizAttempt.class);
@@ -413,10 +414,8 @@ class QuizSolveServiceTest {
   @DisplayName("getAttemptResult 성공 - 제출 완료된 퀴즈 결과를 조회한다")
   void getAttemptResult_Success() {
     given(quizAttemptRepository.findById(100L)).willReturn(Optional.of(quizAttempt));
-    given(member.getUuid()).willReturn("test-uuid");
     given(quizAttempt.getStatus()).willReturn(AttemptStatus.SUBMITTED);
 
-    given(quizAttempt.getQuizSet()).willReturn(quizSet);
     com.realdev.readle.domain.content.entity.Content mockContent =
         mock(com.realdev.readle.domain.content.entity.Content.class);
     given(quizSet.getContent()).willReturn(mockContent);
@@ -452,6 +451,8 @@ class QuizSolveServiceTest {
     QuizAttemptResultResponse response = quizSolveService.getAttemptResult("test-uuid", 100L);
 
     assertThat(response).isNotNull();
+    assertThat(response.getQuizSetId()).isEqualTo(100L);
+    assertThat(response.getAttemptId()).isEqualTo(100L);
     assertThat(response.getTitle()).isEqualTo("Spring @Transactional 심층 이해");
     assertThat(response.getTags()).containsExactly("spring");
     assertThat(response.getAccuracyRate()).isEqualTo(new java.math.BigDecimal("100.00"));
