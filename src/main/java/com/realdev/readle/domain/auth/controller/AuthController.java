@@ -177,6 +177,8 @@ public class AuthController {
   private boolean hasMatchingBrowserState(String state, String browserState) {
     return state != null
         && browserState != null
+        && !state.isBlank()
+        && !browserState.isBlank()
         && MessageDigest.isEqual(
             state.getBytes(StandardCharsets.UTF_8), browserState.getBytes(StandardCharsets.UTF_8));
   }

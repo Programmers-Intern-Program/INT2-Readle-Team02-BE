@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -109,6 +110,42 @@ class AuthControllerTest {
 
     verify(authService, never()).callback("google", "authorization-code", "expected-state");
     verify(authService, never()).callbackFailure("google", "expected-state");
+  }
+
+  @Test
+  void rejectsCallbackWithBlankStateParameterBeforeTokenIssuance() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/auth/google/callback")
+                .param("code", "authorization-code")
+                .param("state", "")
+                .cookie(new Cookie(STATE_COOKIE, "expected-state")))
+        .andExpect(status().isFound())
+        .andExpect(header().string(HttpHeaders.LOCATION, "/login?authError=oauth_failed"))
+        .andExpect(
+            header()
+                .stringValues(
+                    HttpHeaders.SET_COOKIE, hasItem(containsString(STATE_COOKIE + "=;"))));
+
+    verifyNoInteractions(authService);
+  }
+
+  @Test
+  void rejectsCallbackWithBlankBrowserStateCookieBeforeTokenIssuance() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/auth/google/callback")
+                .param("code", "authorization-code")
+                .param("state", "expected-state")
+                .cookie(new Cookie(STATE_COOKIE, "")))
+        .andExpect(status().isFound())
+        .andExpect(header().string(HttpHeaders.LOCATION, "/login?authError=oauth_failed"))
+        .andExpect(
+            header()
+                .stringValues(
+                    HttpHeaders.SET_COOKIE, hasItem(containsString(STATE_COOKIE + "=;"))));
+
+    verifyNoInteractions(authService);
   }
 
   @Test
