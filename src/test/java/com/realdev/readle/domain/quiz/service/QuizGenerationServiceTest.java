@@ -210,7 +210,8 @@ class QuizGenerationServiceTest {
     existingQuizSet.fail(); // FAILED 상태로 만듦
     ReflectionTestUtils.setField(existingQuizSet, "id", 300L);
     ReflectionTestUtils.setField(existingQuizSet, "questionCount", 3);
-    ReflectionTestUtils.setField(existingQuizSet, "completedAt", java.time.LocalDateTime.now().minusDays(1));
+    ReflectionTestUtils.setField(
+        existingQuizSet, "completedAt", java.time.LocalDateTime.now().minusDays(1));
 
     given(transactionTemplate.execute(any()))
         .willAnswer(
@@ -223,13 +224,16 @@ class QuizGenerationServiceTest {
     // 기존 QuizSet 반환하도록 모킹
     given(quizSetRepository.findBySourceValidationId(100L))
         .willReturn(Optional.of(existingQuizSet));
-    given(quizSetRepository.saveAndFlush(existingQuizSet)).willAnswer(invocation -> {
-        QuizSet arg = invocation.getArgument(0);
-        assertThat(arg.getStatus()).isEqualTo(com.realdev.readle.domain.quiz.entity.QuizSetStatus.GENERATING);
-        assertThat(arg.getQuestionCount()).isNull();
-        assertThat(arg.getCompletedAt()).isNull();
-        return arg;
-    });
+    given(quizSetRepository.saveAndFlush(existingQuizSet))
+        .willAnswer(
+            invocation -> {
+              QuizSet arg = invocation.getArgument(0);
+              assertThat(arg.getStatus())
+                  .isEqualTo(com.realdev.readle.domain.quiz.entity.QuizSetStatus.GENERATING);
+              assertThat(arg.getQuestionCount()).isNull();
+              assertThat(arg.getCompletedAt()).isNull();
+              return arg;
+            });
     given(quizSetRepository.findById(300L)).willReturn(Optional.of(existingQuizSet));
 
     given(promptLoader.loadPrompt(anyString(), any())).willReturn("system prompt");
@@ -248,7 +252,8 @@ class QuizGenerationServiceTest {
     org.mockito.Mockito.verify(existingQuizSet, org.mockito.Mockito.times(1)).retry();
 
     // saveAndFlush 호출 횟수 검증 (내부 상태 검증은 given의 willAnswer에서 수행됨)
-    org.mockito.Mockito.verify(quizSetRepository, org.mockito.Mockito.times(1)).saveAndFlush(any(QuizSet.class));
+    org.mockito.Mockito.verify(quizSetRepository, org.mockito.Mockito.times(1))
+        .saveAndFlush(any(QuizSet.class));
 
     // catch 블록에서 fail()이 호출되어 다시 FAILED로 돌아왔는지 검증
     // 초기 셋업 때 fail() 1번 + catch 블록에서 fail() 1번 = 총 2번 호출됨
