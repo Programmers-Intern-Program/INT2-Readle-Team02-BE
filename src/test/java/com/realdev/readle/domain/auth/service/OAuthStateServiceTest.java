@@ -88,6 +88,24 @@ class OAuthStateServiceTest {
   }
 
   @Test
+  void consumesFailureStateWithoutDecryptingVerifier() {
+    OAuthStateService service = service();
+    OAuthAuthorizationState state =
+        OAuthAuthorizationState.create(
+            "state-hash",
+            OAuthProvider.GOOGLE,
+            "/dashboard",
+            "malformed-ciphertext",
+            LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).plusMinutes(1));
+    when(stateRepository.findByStateHashAndOauthProvider(any(), any()))
+        .thenReturn(Optional.of(state));
+
+    assertThat(service.consumeReturnTo(OAuthProvider.GOOGLE, "state")).isEqualTo("/dashboard");
+
+    verify(stateRepository).delete(state);
+  }
+
+  @Test
   void mapsLockAcquisitionFailuresToOAuthFailure() {
     OAuthStateService service = service();
     when(stateRepository.findByStateHashAndOauthProvider(any(), any()))
