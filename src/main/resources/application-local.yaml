@@ -1,3 +1,8 @@
+logging:
+  level:
+    com.realdev.readle: debug
+    org.springframework.web.servlet: debug
+
 spring:
   datasource:
     driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:com.mysql.cj.jdbc.Driver}
