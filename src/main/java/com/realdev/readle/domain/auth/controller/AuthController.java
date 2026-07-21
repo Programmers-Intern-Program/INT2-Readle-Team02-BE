@@ -19,8 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.CookieValue;
@@ -128,20 +126,14 @@ public class AuthController {
         .build();
   }
 
-  @Operation(summary = "세션 상태 조회", description = "현재 액세스 토큰과 리프레시 토큰의 인증 상태를 조회합니다.")
+  @Operation(summary = "세션 상태 조회", description = "현재 리프레시 토큰 쿠키의 인증 상태를 조회합니다.")
   @GetMapping("/auth/session")
   public ApiResponse<SessionResponse> session(
-      Authentication authentication,
-      @AuthenticationPrincipal String memberUuid,
       HttpServletRequest request,
       @CookieValue(value = RefreshTokenCookie.NAME, required = false) String refreshToken) {
     ((CsrfToken) request.getAttribute(CsrfToken.class.getName())).getToken();
-    boolean authenticated =
-        authentication != null
-            && authentication.isAuthenticated()
-            && !(authentication instanceof AnonymousAuthenticationToken);
-    String uuid = authenticated ? memberUuid : null;
-    authenticated = authenticated && refreshTokenService.isActiveForMember(refreshToken, uuid);
+    String uuid = refreshTokenService.activeMemberUuid(refreshToken).orElse(null);
+    boolean authenticated = uuid != null;
     return new ApiResponse<>(new SessionResponse(authenticated, authenticated ? uuid : null));
   }
 

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -31,6 +32,7 @@ import com.realdev.readle.global.security.JwtService;
 import com.realdev.readle.global.security.SecurityErrorResponseWriter;
 import com.realdev.readle.global.security.SecurityProperties;
 import jakarta.servlet.http.Cookie;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +48,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.csrf.CsrfToken;
-import org.springframework.security.web.csrf.DefaultCsrfToken;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -550,19 +551,38 @@ class AuthControllerTest {
   }
 
   @Test
-  void sessionReportsUnauthenticatedNonAnonymousIdentityAsUnauthenticated() {
-    Authentication authentication = new UsernamePasswordAuthenticationToken("member-uuid", null);
+  void sessionReportsAuthenticatedUuidFromActiveRefreshCookie() {
     MockHttpServletRequest request = new MockHttpServletRequest();
-    request.setAttribute(
-        CsrfToken.class.getName(), new DefaultCsrfToken("X-XSRF-TOKEN", "XSRF-TOKEN", "token"));
+    CsrfToken csrfToken = mock(CsrfToken.class);
+    when(csrfToken.getToken()).thenReturn("csrf-token");
+    request.setAttribute(CsrfToken.class.getName(), csrfToken);
+    when(refreshTokenService.activeMemberUuid("refresh-token"))
+        .thenReturn(Optional.of("member-uuid"));
     AuthController controller = new AuthController(authService, refreshTokenService, properties);
 
     AuthController.ApiResponse<AuthController.SessionResponse> response =
-        controller.session(authentication, "member-uuid", request, "refresh-token");
+        controller.session(request, "refresh-token");
+
+    assertThat(response.data().authenticated()).isTrue();
+    assertThat(response.data().uuid()).isEqualTo("member-uuid");
+    verify(csrfToken).getToken();
+  }
+
+  @Test
+  void sessionReportsUnauthenticatedWhenRefreshCookieIsInactive() {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    CsrfToken csrfToken = mock(CsrfToken.class);
+    when(csrfToken.getToken()).thenReturn("csrf-token");
+    request.setAttribute(CsrfToken.class.getName(), csrfToken);
+    when(refreshTokenService.activeMemberUuid("refresh-token")).thenReturn(Optional.empty());
+    AuthController controller = new AuthController(authService, refreshTokenService, properties);
+
+    AuthController.ApiResponse<AuthController.SessionResponse> response =
+        controller.session(request, "refresh-token");
 
     assertThat(response.data().authenticated()).isFalse();
     assertThat(response.data().uuid()).isNull();
-    verify(refreshTokenService, never()).isActiveForMember("refresh-token", "member-uuid");
+    verify(csrfToken).getToken();
   }
 
   @Test
