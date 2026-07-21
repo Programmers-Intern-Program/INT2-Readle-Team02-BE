@@ -15,9 +15,10 @@ public class DashboardService {
   private final DashboardQueryRepository dashboardQueryRepository;
 
   public DashboardResponse getDashboardSummary(String memberUuid) {
-    DashboardResponse.Totals totals = dashboardQueryRepository.fetchTotals(memberUuid);
     List<DashboardResponse.TagSummary> tagSummaries =
         dashboardQueryRepository.fetchTagSummaries(memberUuid);
+    DashboardResponse.Totals totals =
+        dashboardQueryRepository.fetchTotals(memberUuid, tagSummaries.size());
     List<DashboardResponse.RecentRecord> recentRecords =
         dashboardQueryRepository.fetchRecentRecords(memberUuid, 5);
 

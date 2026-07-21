@@ -62,7 +62,7 @@ class DashboardQueryRepositoryTest {
   @Test
   @DisplayName("전체 현황은 현재 사용자의 제출 완료 결과만 문제 수 기준으로 가중 집계한다")
   void fetchTotals_AggregatesOnlyCurrentMemberSubmittedResults() {
-    DashboardResponse.Totals totals = dashboardQueryRepository.fetchTotals(MEMBER_UUID);
+    DashboardResponse.Totals totals = dashboardQueryRepository.fetchTotals(MEMBER_UUID, 2);
 
     assertThat(totals.getCompletedQuizCount()).isEqualTo(2);
     assertThat(totals.getTotalQuestionCount()).isEqualTo(7);
@@ -113,7 +113,7 @@ class DashboardQueryRepositoryTest {
   @Test
   @DisplayName("학습 이력이 없는 사용자는 빈 대시보드 값을 반환한다")
   void fetchDashboardData_ReturnsEmptyValues() {
-    DashboardResponse.Totals totals = dashboardQueryRepository.fetchTotals("unknown-member");
+    DashboardResponse.Totals totals = dashboardQueryRepository.fetchTotals("unknown-member", 0);
 
     assertThat(totals.getCompletedQuizCount()).isZero();
     assertThat(totals.getTotalQuestionCount()).isZero();

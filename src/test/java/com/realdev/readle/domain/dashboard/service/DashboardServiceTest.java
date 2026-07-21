@@ -29,7 +29,7 @@ class DashboardServiceTest {
         DashboardResponse.Totals.builder()
             .completedQuizCount(12)
             .totalQuestionCount(58)
-            .tagCount(9)
+            .tagCount(1)
             .averageAccuracyRate(new BigDecimal("78.40"))
             .lastCompletedAt(LocalDateTime.of(2026, 7, 16, 11, 48))
             .build();
@@ -57,8 +57,8 @@ class DashboardServiceTest {
                     DashboardResponse.TagInfo.builder().tagId(2L).name("transaction").build()))
             .build();
 
-    given(dashboardQueryRepository.fetchTotals("test-uuid")).willReturn(mockTotals);
     given(dashboardQueryRepository.fetchTagSummaries("test-uuid")).willReturn(List.of(mockTag));
+    given(dashboardQueryRepository.fetchTotals("test-uuid", 1)).willReturn(mockTotals);
     given(dashboardQueryRepository.fetchRecentRecords("test-uuid", 5))
         .willReturn(List.of(mockRecord));
 
@@ -67,7 +67,7 @@ class DashboardServiceTest {
     assertThat(response).isNotNull();
     assertThat(response.getTotals().getCompletedQuizCount()).isEqualTo(12);
     assertThat(response.getTotals().getTotalQuestionCount()).isEqualTo(58);
-    assertThat(response.getTotals().getTagCount()).isEqualTo(9);
+    assertThat(response.getTotals().getTagCount()).isEqualTo(1);
     assertThat(response.getTagSummaries()).hasSize(1);
     assertThat(response.getTagSummaries().get(0).getName()).isEqualTo("spring");
     assertThat(response.getRecentRecords()).hasSize(1);

@@ -31,7 +31,7 @@ public class DashboardQueryRepository {
   private final JPAQueryFactory queryFactory;
   private final ContentTagRepository contentTagRepository;
 
-  public DashboardResponse.Totals fetchTotals(String memberUuid) {
+  public DashboardResponse.Totals fetchTotals(String memberUuid, int tagCount) {
     Tuple aggregate =
         queryFactory
             .select(
@@ -55,24 +55,10 @@ public class DashboardQueryRepository {
     LocalDateTime lastCompletedAt =
         aggregate != null ? aggregate.get(3, LocalDateTime.class) : null;
 
-    Long learnedTagCount =
-        queryFactory
-            .select(contentTag.tag.id.countDistinct())
-            .from(quizResult)
-            .join(quizResult.quizAttempt, quizAttempt)
-            .join(quizAttempt.quizSet, quizSet)
-            .join(quizSet.content, content)
-            .join(contentTag)
-            .on(contentTag.content.id.eq(content.id))
-            .where(
-                quizAttempt.member.uuid.eq(memberUuid),
-                quizAttempt.status.eq(AttemptStatus.SUBMITTED))
-            .fetchOne();
-
     return DashboardResponse.Totals.builder()
         .completedQuizCount(completedQuizCount != null ? completedQuizCount.intValue() : 0)
         .totalQuestionCount(totalQuestionCount != null ? totalQuestionCount : 0)
-        .tagCount(learnedTagCount != null ? learnedTagCount.intValue() : 0)
+        .tagCount(tagCount)
         .averageAccuracyRate(calculateAccuracyRate(correctCount, totalQuestionCount))
         .lastCompletedAt(lastCompletedAt)
         .build();
