@@ -5,9 +5,9 @@ import com.realdev.readle.domain.quiz.dto.response.ResultReportHistoryResponse;
 import com.realdev.readle.domain.quiz.service.QuizSolveService;
 import com.realdev.readle.domain.quiz.service.ResultReportService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
@@ -32,13 +32,18 @@ public class ResultReportController {
   @GetMapping
   public ResponseEntity<ResultReportHistoryResponse> getResultReports(
       @AuthenticationPrincipal String memberUuid,
-      @RequestParam(defaultValue = "0") @Min(value = 0, message = "page는 0 이상이어야 합니다.") int page,
-      @RequestParam(defaultValue = "10")
-          @Min(value = 1, message = "size는 1 이상이어야 합니다.") @Max(value = 50, message = "size는 50 이하여야 합니다.") int size,
-      @RequestParam(defaultValue = "latest")
+      @Parameter(description = "다음 페이지 조회 커서. 첫 조회에서는 생략합니다.") @RequestParam(required = false)
+          String cursor,
+      @Parameter(description = "조회 개수 (1~50)")
+          @RequestParam(defaultValue = "10")
+          @Positive(message = "size는 양수여야 합니다.") @Max(value = 50, message = "size는 50 이하여야 합니다.") int size,
+      @Parameter(description = "정렬 방식 (latest 또는 oldest)")
+          @RequestParam(defaultValue = "latest")
           @Pattern(regexp = "latest|oldest", message = "sort는 latest 또는 oldest만 허용됩니다.") String sort,
-      @RequestParam(required = false) @Positive(message = "tagId는 양수여야 합니다.") Long tagId) {
-    return ResponseEntity.ok(resultReportService.getHistory(memberUuid, page, size, sort, tagId));
+      @Parameter(description = "태그 ID 필터")
+          @RequestParam(required = false)
+          @Positive(message = "tagId는 양수여야 합니다.") Long tagId) {
+    return ResponseEntity.ok(resultReportService.getHistory(memberUuid, cursor, size, sort, tagId));
   }
 
   @Operation(summary = "결과 리포트 상세 조회", description = "결과 리포트 ID로 퀴즈 풀이 결과를 조회합니다.")

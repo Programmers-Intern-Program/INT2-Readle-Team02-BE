@@ -11,25 +11,17 @@ import lombok.Getter;
 public class ResultReportHistoryResponse {
 
   private final List<HistoryItem> content;
-  private final Integer page;
   private final Integer size;
-  private final Long totalElements;
-  private final Integer totalPages;
-  private final Boolean first;
-  private final Boolean last;
+  private final String nextCursor;
+  private final Boolean hasNext;
 
   public static ResultReportHistoryResponse of(
-      List<HistoryItem> content, int page, int size, long totalElements) {
-    int totalPages = totalElements == 0 ? 0 : (int) Math.ceil((double) totalElements / size);
-
+      List<HistoryItem> content, int size, String nextCursor, boolean hasNext) {
     return ResultReportHistoryResponse.builder()
         .content(content)
-        .page(page)
         .size(size)
-        .totalElements(totalElements)
-        .totalPages(totalPages)
-        .first(page == 0)
-        .last(totalPages == 0 || page >= totalPages - 1)
+        .nextCursor(nextCursor)
+        .hasNext(hasNext)
         .build();
   }
 

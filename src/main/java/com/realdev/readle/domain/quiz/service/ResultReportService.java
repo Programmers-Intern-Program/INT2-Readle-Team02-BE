@@ -1,5 +1,6 @@
 package com.realdev.readle.domain.quiz.service;
 
+import com.realdev.readle.domain.quiz.dto.request.ResultReportCursor;
 import com.realdev.readle.domain.quiz.dto.request.ResultReportSort;
 import com.realdev.readle.domain.quiz.dto.response.ResultReportHistoryResponse;
 import com.realdev.readle.domain.quiz.repository.ResultReportQueryRepository;
@@ -15,8 +16,13 @@ public class ResultReportService {
   private final ResultReportQueryRepository resultReportQueryRepository;
 
   public ResultReportHistoryResponse getHistory(
-      String memberUuid, int page, int size, String sort, Long tagId) {
+      String memberUuid, String cursor, int size, String sort, Long tagId) {
+    ResultReportSort resultReportSort = ResultReportSort.from(sort);
     return resultReportQueryRepository.findHistory(
-        memberUuid, page, size, ResultReportSort.from(sort), tagId);
+        memberUuid,
+        ResultReportCursor.decode(cursor, resultReportSort),
+        size,
+        resultReportSort,
+        tagId);
   }
 }

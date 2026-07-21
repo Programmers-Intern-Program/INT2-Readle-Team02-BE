@@ -3,6 +3,7 @@ package com.realdev.readle.domain.quiz.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.groups.Tuple.tuple;
 
+import com.realdev.readle.domain.quiz.dto.request.ResultReportCursor;
 import com.realdev.readle.domain.quiz.dto.request.ResultReportSort;
 import com.realdev.readle.domain.quiz.dto.response.ResultReportHistoryResponse;
 import jakarta.persistence.EntityManagerFactory;
@@ -60,15 +61,14 @@ class ResultReportQueryRepositoryTest {
   @DisplayName("현재 사용자의 제출 완료 결과를 최신순과 결과 ID 역순으로 조회한다")
   void findHistory_ReturnsCurrentMemberSubmittedResultsInStableLatestOrder() {
     ResultReportHistoryResponse response =
-        resultReportQueryRepository.findHistory(MEMBER_UUID, 0, 10, ResultReportSort.LATEST, null);
+        resultReportQueryRepository.findHistory(
+            MEMBER_UUID, null, 10, ResultReportSort.LATEST, null);
 
     assertThat(response.getContent())
         .extracting(ResultReportHistoryResponse.HistoryItem::getReportId)
         .containsExactly(704L, 702L, 701L);
-    assertThat(response.getTotalElements()).isEqualTo(3);
-    assertThat(response.getTotalPages()).isEqualTo(1);
-    assertThat(response.getFirst()).isTrue();
-    assertThat(response.getLast()).isTrue();
+    assertThat(response.getHasNext()).isFalse();
+    assertThat(response.getNextCursor()).isNull();
 
     ResultReportHistoryResponse.HistoryItem first = response.getContent().get(0);
     assertThat(first.getQuizSetId()).isEqualTo(304L);
@@ -86,35 +86,60 @@ class ResultReportQueryRepositoryTest {
   }
 
   @Test
-  @DisplayName("오래된순 조회와 페이지 이동에서도 결과 ID 보조 정렬과 페이지 메타데이터가 유지된다")
-  void findHistory_AppliesOldestOrderAndPagination() {
+  @DisplayName("오래된순 커서 조회에서도 결과 ID 보조 정렬을 유지한다")
+  void findHistory_AppliesOldestOrderAndCursor() {
     ResultReportHistoryResponse firstPage =
-        resultReportQueryRepository.findHistory(MEMBER_UUID, 0, 2, ResultReportSort.OLDEST, null);
+        resultReportQueryRepository.findHistory(
+            MEMBER_UUID, null, 2, ResultReportSort.OLDEST, null);
+    ResultReportCursor cursor =
+        ResultReportCursor.decode(firstPage.getNextCursor(), ResultReportSort.OLDEST);
     ResultReportHistoryResponse secondPage =
-        resultReportQueryRepository.findHistory(MEMBER_UUID, 1, 2, ResultReportSort.OLDEST, null);
+        resultReportQueryRepository.findHistory(
+            MEMBER_UUID, cursor, 2, ResultReportSort.OLDEST, null);
 
     assertThat(firstPage.getContent())
         .extracting(ResultReportHistoryResponse.HistoryItem::getReportId)
         .containsExactly(701L, 702L);
-    assertThat(firstPage.getTotalPages()).isEqualTo(2);
-    assertThat(firstPage.getLast()).isFalse();
+    assertThat(firstPage.getHasNext()).isTrue();
+    assertThat(firstPage.getNextCursor()).isNotBlank();
     assertThat(secondPage.getContent())
         .extracting(ResultReportHistoryResponse.HistoryItem::getReportId)
         .containsExactly(704L);
-    assertThat(secondPage.getFirst()).isFalse();
-    assertThat(secondPage.getLast()).isTrue();
+    assertThat(secondPage.getHasNext()).isFalse();
+    assertThat(secondPage.getNextCursor()).isNull();
+  }
+
+  @Test
+  @DisplayName("최신순 커서는 동일 완료 시각의 결과를 중복하거나 누락하지 않는다")
+  void findHistory_AppliesLatestCursorWithStableIdBoundary() {
+    ResultReportHistoryResponse firstPage =
+        resultReportQueryRepository.findHistory(
+            MEMBER_UUID, null, 2, ResultReportSort.LATEST, null);
+    ResultReportCursor cursor =
+        ResultReportCursor.decode(firstPage.getNextCursor(), ResultReportSort.LATEST);
+    ResultReportHistoryResponse secondPage =
+        resultReportQueryRepository.findHistory(
+            MEMBER_UUID, cursor, 2, ResultReportSort.LATEST, null);
+
+    assertThat(firstPage.getContent())
+        .extracting(ResultReportHistoryResponse.HistoryItem::getReportId)
+        .containsExactly(704L, 702L);
+    assertThat(secondPage.getContent())
+        .extracting(ResultReportHistoryResponse.HistoryItem::getReportId)
+        .containsExactly(701L);
   }
 
   @Test
   @DisplayName("태그가 지정되면 해당 태그의 학습 결과만 조회하고 전체 건수도 동일 조건으로 계산한다")
   void findHistory_FiltersByTag() {
     ResultReportHistoryResponse response =
-        resultReportQueryRepository.findHistory(MEMBER_UUID, 0, 10, ResultReportSort.LATEST, 801L);
+        resultReportQueryRepository.findHistory(
+            MEMBER_UUID, null, 10, ResultReportSort.LATEST, 801L);
 
     assertThat(response.getContent())
         .extracting(ResultReportHistoryResponse.HistoryItem::getReportId)
         .containsExactly(701L);
-    assertThat(response.getTotalElements()).isEqualTo(1);
+    assertThat(response.getHasNext()).isFalse();
   }
 
   @Test
@@ -122,13 +147,11 @@ class ResultReportQueryRepositoryTest {
   void findHistory_ReturnsEmptyPage() {
     ResultReportHistoryResponse response =
         resultReportQueryRepository.findHistory(
-            "unknown-member", 0, 10, ResultReportSort.LATEST, null);
+            "unknown-member", null, 10, ResultReportSort.LATEST, null);
 
     assertThat(response.getContent()).isEmpty();
-    assertThat(response.getTotalElements()).isZero();
-    assertThat(response.getTotalPages()).isZero();
-    assertThat(response.getFirst()).isTrue();
-    assertThat(response.getLast()).isTrue();
+    assertThat(response.getHasNext()).isFalse();
+    assertThat(response.getNextCursor()).isNull();
   }
 
   @Test
@@ -138,9 +161,9 @@ class ResultReportQueryRepositoryTest {
     statistics.setStatisticsEnabled(true);
     statistics.clear();
 
-    resultReportQueryRepository.findHistory(MEMBER_UUID, 0, 10, ResultReportSort.LATEST, null);
+    resultReportQueryRepository.findHistory(MEMBER_UUID, null, 10, ResultReportSort.LATEST, null);
 
-    assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+    assertThat(statistics.getPrepareStatementCount()).isEqualTo(2);
   }
 
   private void insertMember(Long id, String uuid, String oauthId) {

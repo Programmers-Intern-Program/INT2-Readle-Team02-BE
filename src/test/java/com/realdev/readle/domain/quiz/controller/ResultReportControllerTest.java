@@ -75,15 +75,16 @@ class ResultReportControllerTest {
                                 .name("spring")
                                 .build()))
                     .build()),
-            1,
             10,
-            11);
-    given(resultReportService.getHistory(memberUuid, 1, 10, "oldest", 31L)).willReturn(response);
+            "next-cursor",
+            true);
+    given(resultReportService.getHistory(memberUuid, "current-cursor", 10, "oldest", 31L))
+        .willReturn(response);
 
     mockMvc
         .perform(
             get("/api/result-reports")
-                .param("page", "1")
+                .param("cursor", "current-cursor")
                 .param("size", "10")
                 .param("sort", "oldest")
                 .param("tagId", "31")
@@ -92,13 +93,11 @@ class ResultReportControllerTest {
         .andExpect(jsonPath("$.content[0].reportId").value(701))
         .andExpect(jsonPath("$.content[0].quizSetId").value(201))
         .andExpect(jsonPath("$.content[0].tags[0].name").value("spring"))
-        .andExpect(jsonPath("$.page").value(1))
-        .andExpect(jsonPath("$.totalElements").value(11))
-        .andExpect(jsonPath("$.totalPages").value(2))
-        .andExpect(jsonPath("$.first").value(false))
-        .andExpect(jsonPath("$.last").value(true));
+        .andExpect(jsonPath("$.size").value(10))
+        .andExpect(jsonPath("$.nextCursor").value("next-cursor"))
+        .andExpect(jsonPath("$.hasNext").value(true));
 
-    then(resultReportService).should().getHistory(memberUuid, 1, 10, "oldest", 31L);
+    then(resultReportService).should().getHistory(memberUuid, "current-cursor", 10, "oldest", 31L);
   }
 
   @Test
@@ -110,7 +109,6 @@ class ResultReportControllerTest {
     mockMvc
         .perform(
             get("/api/result-reports")
-                .param("page", "-1")
                 .param("size", "51")
                 .param("sort", "popular")
                 .param("tagId", "0")

@@ -10,6 +10,7 @@ import com.querydsl.core.BooleanBuilder;
 import com.querydsl.core.types.OrderSpecifier;
 import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import com.realdev.readle.domain.quiz.dto.request.ResultReportCursor;
 import com.realdev.readle.domain.quiz.dto.request.ResultReportSort;
 import com.realdev.readle.domain.quiz.dto.response.ResultReportHistoryResponse;
 import com.realdev.readle.domain.quiz.entity.AttemptStatus;
@@ -31,8 +32,8 @@ public class ResultReportQueryRepository {
   private final ContentTagRepository contentTagRepository;
 
   public ResultReportHistoryResponse findHistory(
-      String memberUuid, int page, int size, ResultReportSort sort, Long tagId) {
-    BooleanBuilder conditions = historyConditions(memberUuid, tagId);
+      String memberUuid, ResultReportCursor cursor, int size, ResultReportSort sort, Long tagId) {
+    BooleanBuilder conditions = historyConditions(memberUuid, cursor, sort, tagId);
     OrderSpecifier<?> completedAtOrder =
         sort == ResultReportSort.LATEST
             ? quizResult.completedAt.desc()
@@ -40,7 +41,7 @@ public class ResultReportQueryRepository {
     OrderSpecifier<?> idOrder =
         sort == ResultReportSort.LATEST ? quizResult.id.desc() : quizResult.id.asc();
 
-    List<QuizResult> results =
+    List<QuizResult> fetchedResults =
         queryFactory
             .selectFrom(quizResult)
             .join(quizResult.quizAttempt, quizAttempt)
@@ -51,19 +52,11 @@ public class ResultReportQueryRepository {
             .fetchJoin()
             .where(conditions)
             .orderBy(completedAtOrder, idOrder)
-            .offset((long) page * size)
-            .limit(size)
+            .limit(size + 1L)
             .fetch();
 
-    Long totalElements =
-        queryFactory
-            .select(quizResult.count())
-            .from(quizResult)
-            .join(quizResult.quizAttempt, quizAttempt)
-            .join(quizAttempt.quizSet, quizSet)
-            .join(quizSet.content, content)
-            .where(conditions)
-            .fetchOne();
+    boolean hasNext = fetchedResults.size() > size;
+    List<QuizResult> results = hasNext ? fetchedResults.subList(0, size) : fetchedResults;
 
     Map<Long, List<ResultReportHistoryResponse.TagInfo>> tagsByContentId =
         fetchTagsByContentId(
@@ -74,16 +67,45 @@ public class ResultReportQueryRepository {
 
     List<ResultReportHistoryResponse.HistoryItem> items =
         results.stream().map(result -> toHistoryItem(result, tagsByContentId)).toList();
+    String nextCursor =
+        hasNext
+            ? new ResultReportCursor(
+                    sort,
+                    results.get(results.size() - 1).getCompletedAt(),
+                    results.get(results.size() - 1).getId())
+                .encode()
+            : null;
 
-    return ResultReportHistoryResponse.of(
-        items, page, size, totalElements != null ? totalElements : 0L);
+    return ResultReportHistoryResponse.of(items, size, nextCursor, hasNext);
   }
 
-  private BooleanBuilder historyConditions(String memberUuid, Long tagId) {
+  private BooleanBuilder historyConditions(
+      String memberUuid, ResultReportCursor cursor, ResultReportSort sort, Long tagId) {
     BooleanBuilder conditions =
         new BooleanBuilder()
             .and(quizAttempt.member.uuid.eq(memberUuid))
             .and(quizAttempt.status.eq(AttemptStatus.SUBMITTED));
+
+    if (cursor != null) {
+      conditions.and(
+          sort == ResultReportSort.LATEST
+              ? quizResult
+                  .completedAt
+                  .lt(cursor.completedAt())
+                  .or(
+                      quizResult
+                          .completedAt
+                          .eq(cursor.completedAt())
+                          .and(quizResult.id.lt(cursor.reportId())))
+              : quizResult
+                  .completedAt
+                  .gt(cursor.completedAt())
+                  .or(
+                      quizResult
+                          .completedAt
+                          .eq(cursor.completedAt())
+                          .and(quizResult.id.gt(cursor.reportId()))));
+    }
 
     if (tagId != null) {
       conditions.and(
