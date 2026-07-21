@@ -11,8 +11,10 @@ import java.net.MalformedURLException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URL;
+import java.net.UnknownHostException;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.util.Collection;
 import java.util.List;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SNIHostName;
@@ -138,13 +140,29 @@ public class WebCrawler {
             try {
               Certificate[] certs = session.getPeerCertificates();
               if (certs.length > 0 && certs[0] instanceof X509Certificate x509) {
-                java.util.Collection<java.util.List<?>> sans = x509.getSubjectAlternativeNames();
+                Collection<List<?>> sans = x509.getSubjectAlternativeNames();
                 if (sans != null) {
-                  for (java.util.List<?> san : sans) {
+                  boolean isIpHost = isIpLiteral(host);
+                  for (List<?> san : sans) {
                     int type = (Integer) san.get(0);
-                    if (type == 2 || type == 7) { // 2 = dNSName, 7 = iPAddress
-                      String nameOrIp = (String) san.get(1);
-                      if (matchDomain(host, nameOrIp)) {
+                    if (isIpHost && type == 7) { // iPAddress
+                      String sanIp = (String) san.get(1);
+                      try {
+                        String cleanHost =
+                            host.startsWith("[") && host.endsWith("]")
+                                ? host.substring(1, host.length() - 1)
+                                : host;
+                        InetAddress hostAddr = InetAddress.getByName(cleanHost);
+                        InetAddress sanAddr = InetAddress.getByName(sanIp);
+                        if (hostAddr.equals(sanAddr)) {
+                          return true;
+                        }
+                      } catch (UnknownHostException ex) {
+                        // Ignore parse errors
+                      }
+                    } else if (!isIpHost && type == 2) { // dNSName
+                      String dnsName = (String) san.get(1);
+                      if (matchDomain(host, dnsName)) {
                         return true;
                       }
                     }
@@ -194,6 +212,13 @@ public class WebCrawler {
       }
     }
     return false;
+  }
+
+  private boolean isIpLiteral(String host) {
+    if (host.startsWith("[") && host.endsWith("]")) {
+      return true; // IPv6 literal
+    }
+    return host.matches("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$"); // IPv4 literal
   }
 
   @NonNull HttpURLConnection getHttpURLConnection(
