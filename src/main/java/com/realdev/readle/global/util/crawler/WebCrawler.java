@@ -141,9 +141,10 @@ public class WebCrawler {
                 java.util.Collection<java.util.List<?>> sans = x509.getSubjectAlternativeNames();
                 if (sans != null) {
                   for (java.util.List<?> san : sans) {
-                    if ((Integer) san.get(0) == 2) { // 2 = dNSName
-                      String dnsName = (String) san.get(1);
-                      if (matchDomain(host, dnsName)) {
+                    int type = (Integer) san.get(0);
+                    if (type == 2 || type == 7) { // 2 = dNSName, 7 = iPAddress
+                      String nameOrIp = (String) san.get(1);
+                      if (matchDomain(host, nameOrIp)) {
                         return true;
                       }
                     }
