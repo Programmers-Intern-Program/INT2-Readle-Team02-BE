@@ -406,7 +406,11 @@ class AiValidationServiceTest {
     ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
     verify(claudeClient).generateValidationMessage(anyString(), userPromptCaptor.capture());
 
-    assertThat(userPromptCaptor.getValue()).contains(extractedText);
+    String actualPrompt = userPromptCaptor.getValue();
+    // 1. extractedText가 포함되어 있어야 함
+    assertThat(actualPrompt).contains(extractedText);
+    // 2. rawText(URL)는 포함되지 않아야 함 — extractedText가 rawText를 완전히 대체하는 계약
+    assertThat(actualPrompt).doesNotContain("https://example.com/article");
   }
 
   // =========================================================================
