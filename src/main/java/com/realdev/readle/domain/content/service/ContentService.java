@@ -21,6 +21,7 @@ import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.realdev.readle.global.util.crawler.WebCrawler;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -67,21 +68,8 @@ public class ContentService {
   @Transactional(readOnly = true)
   public ContentValidationResponse getValidationResult(Long contentId, String memberUuid) {
     validateAuthentication(memberUuid);
-
-    // 콘텐츠 존재 여부 및 본인 소유 확인
-    Content content =
-        contentRepository
-            .findById(contentId)
-            .orElseThrow(() -> new CustomException(ContentErrorCode.CONTENT_NOT_FOUND));
-    if (!content.getMember().getUuid().equals(memberUuid)) {
-      throw new CustomException(ContentErrorCode.CONTENT_ACCESS_DENIED);
-    }
-
-    // 최신 검증 이력 조회
-    ContentValidation validation =
-        contentValidationRepository
-            .findFirstByContentIdOrderByCreatedAtDesc(contentId)
-            .orElseThrow(() -> new CustomException(ContentErrorCode.CONTENT_VALIDATION_NOT_FOUND));
+    validateContentOwnership(contentId, memberUuid);
+    ContentValidation validation = getLatestValidation(contentId);
 
     // bypassAvailable 조건 계산
     boolean bypassAvailable =
@@ -110,6 +98,27 @@ public class ContentService {
         bypassAvailable,
         validation.getCreatedAt(),
         validation.getStatus() == ValidationStatus.PENDING ? null : validation.getValidatedAt());
+  }
+
+  @Transactional
+  public ContentValidationResponse retryValidation(Long contentId, String memberUuid) {
+    validateAuthentication(memberUuid);
+    validateContentOwnership(contentId, memberUuid);
+
+    ContentValidation validation = getLatestValidation(contentId);
+
+    if (validation.getStatus() == ValidationStatus.PENDING) {
+      throw new CustomException(ContentErrorCode.VALIDATION_ALREADY_RUNNING);
+    }
+    if (validation.getStatus() == ValidationStatus.PASSED
+        || validation.getStatus() == ValidationStatus.REJECTED) {
+      throw new CustomException(ContentErrorCode.NOT_RETRYABLE);
+    }
+
+    eventPublisher.publishEvent(new ContentCreatedEvent(contentId, memberUuid));
+
+    return new ContentValidationResponse(
+        contentId, ValidationStatus.PENDING, null, null, false, LocalDateTime.now(), null);
   }
 
   private void validateAuthentication(String memberUuid) {
@@ -196,5 +205,21 @@ public class ContentService {
       return title;
     }
     return text.substring(0, Math.min(TITLE_FALLBACK_LENGTH, text.length()));
+  }
+
+  private void validateContentOwnership(Long contentId, String memberUuid) {
+    Content content =
+        contentRepository
+            .findById(contentId)
+            .orElseThrow(() -> new CustomException(ContentErrorCode.CONTENT_NOT_FOUND));
+    if (!content.getMember().getUuid().equals(memberUuid)) {
+      throw new CustomException(ContentErrorCode.CONTENT_ACCESS_DENIED);
+    }
+  }
+
+  private ContentValidation getLatestValidation(Long contentId) {
+    return contentValidationRepository
+        .findFirstByContentIdOrderByCreatedAtDesc(contentId)
+        .orElseThrow(() -> new CustomException(ContentErrorCode.CONTENT_VALIDATION_NOT_FOUND));
   }
 }
