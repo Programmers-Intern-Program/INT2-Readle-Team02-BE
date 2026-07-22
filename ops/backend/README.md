@@ -44,7 +44,7 @@ see the same file through a bind mount.
 | Container include | `/etc/nginx/readle-backend-upstream.conf` |
 
 Bootstrap the host file from
-`backend/ops/backend/nginx/backend-upstream.conf.template`, bind-mount it into
+`ops/backend/nginx/backend-upstream.conf.template`, bind-mount it into
 `readle-nginx`, and include this exact container path from the Nginx config:
 
 ```nginx

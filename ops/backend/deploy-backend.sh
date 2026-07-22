@@ -494,6 +494,7 @@ deploy() {
   fi
   rm -f "$include_backup"
   podman_cmd stop "$old_slot" >/dev/null 2>&1 || true
+  podman_cmd rm -f "$old_slot" >/dev/null 2>&1 || true
   log "deployed $expected_sha to $active_slot"
 }
 
@@ -536,10 +537,16 @@ self_test() {
   old_image="sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 
   validate_sha "$good_sha"
-  ! validate_sha "0123"
+  if validate_sha "0123"; then
+    die "self-test accepted an invalid SHA"
+  fi
   validate_image_ref "$good_ref"
-  ! validate_image_ref "${IMAGE_PREFIX}:main"
-  ! validate_image_ref "ghcr.io/other/int2-readle-team02-be@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  if validate_image_ref "${IMAGE_PREFIX}:main"; then
+    die "self-test accepted a mutable image tag"
+  fi
+  if validate_image_ref "ghcr.io/other/int2-readle-team02-be@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; then
+    die "self-test accepted a foreign image repository"
+  fi
   [[ "$(inactive_slot "$SLOT_A")" == "$SLOT_B" ]]
   [[ "$(inactive_slot "$SLOT_B")" == "$SLOT_A" ]]
 
@@ -565,7 +572,9 @@ self_test() {
     'pending_rollback_image=' \
     'pending_rollback_revision=' \
     'pending_rollback_ref=' > "$STATE_FILE"
-  ! load_state
+  if load_state; then
+    die "self-test accepted a partial previous state"
+  fi
   printf '%s\n' \
     "active_slot=$SLOT_A" \
     "last_good_image=$old_image" \
@@ -577,7 +586,9 @@ self_test() {
     "pending_rollback_image=$good_image" \
     "pending_rollback_revision=$good_sha" \
     'pending_rollback_ref=' > "$STATE_FILE"
-  ! load_state
+  if load_state; then
+    die "self-test accepted a partial pending rollback state"
+  fi
 
   podman_cmd() {
     printf '%s\n' "$*" >> "$log_file"
@@ -612,15 +623,17 @@ self_test() {
     'pending_rollback_ref=' > "$STATE_FILE"
   load_state
   validate_bootstrap_preflight
-  ! (
+  if (
     container_networks() {
       printf '%s\n' "$PUBLIC_NETWORK $PRIVATE_NETWORK"
     }
     validate_bootstrap_preflight
-  ) 2>/dev/null
+  ) 2>/dev/null; then
+    die "self-test accepted Nginx on the private network"
+  fi
   ! grep -q ' rm -f ' "$log_file"
   log_file="$(mktemp)"
-  ! (
+  if (
     podman_cmd() {
       printf '%s\n' "$*" >> "$log_file"
       case "$*" in
@@ -631,16 +644,20 @@ self_test() {
       esac
     }
     validate_bootstrap_preflight
-  ) 2>/dev/null
+  ) 2>/dev/null; then
+    die "self-test accepted an invalid memory limit"
+  fi
   ! grep -q 'rm -f\|exec readle-nginx\|{{.Image}}' "$log_file"
   wait_healthy "$SLOT_B"
   grep -q "inspect $SLOT_B --format {{.State.Health.Status}}" "$log_file"
   printf '%s\n' "server $SLOT_B:8080;" > "$NGINX_UPSTREAM_INCLUDE_HOST"
-  ! ( validate_bootstrap_preflight ) 2>/dev/null
+  if ( validate_bootstrap_preflight ) 2>/dev/null; then
+    die "self-test accepted a mismatched Nginx upstream"
+  fi
   printf '%s\n' "server $SLOT_A:8080;" > "$NGINX_UPSTREAM_INCLUDE_HOST"
 
   log_file="$(mktemp)"
-  ! (
+  if (
     podman_cmd() {
       printf '%s\n' "$*" >> "$log_file"
       case "$*" in
@@ -650,7 +667,9 @@ self_test() {
       esac
     }
     validate_bootstrap_preflight
-  ) 2>/dev/null
+  ) 2>/dev/null; then
+    die "self-test accepted a published backend port"
+  fi
   ! grep -q 'HostConfig.Memory\|exec readle-nginx\|{{.Image}}\|rm -f' "$log_file"
 
   include_file="$state_dir/backend-upstream-no-backup.conf"
@@ -691,7 +710,7 @@ self_test() {
   ! grep -q "^pull " "$log_file"
 
   log_file="$(mktemp)"
-  ! (
+  if (
     podman_cmd() {
       printf '%s\n' "$*" >> "$log_file"
       case "$*" in
@@ -711,11 +730,13 @@ self_test() {
     edge_smoke() { return 1; }
     flock() { return 0; }
     deploy "$good_ref" "$good_sha"
-  ) 2>/dev/null
+  ) 2>/dev/null; then
+    die "self-test accepted a deployment with an invalid image revision"
+  fi
   ! compgen -G "$state_dir/.readle-backend-upstream.conf.backup.*" >/dev/null
 
   log_file="$(mktemp)"
-  ! (
+  if (
     podman_cmd() {
       printf '%s\n' "$*" >> "$log_file"
       case "$*" in
@@ -741,7 +762,9 @@ self_test() {
     edge_smoke() { return 1; }
     flock() { return 0; }
     deploy "$good_ref" "$good_sha"
-  ) 2>/dev/null
+  ) 2>/dev/null; then
+    die "self-test accepted an unhealthy candidate"
+  fi
   ! compgen -G "$state_dir/.readle-backend-upstream.conf.backup.*" >/dev/null
 
   log_file="$(mktemp)"
@@ -812,7 +835,7 @@ self_test() {
     'pending_rollback_image=' \
     'pending_rollback_revision=' \
     'pending_rollback_ref=' > "$STATE_FILE"
-  ! (
+  if (
     save_state() {
       local count
       count="$(cat "$save_count_file")"
@@ -860,7 +883,9 @@ self_test() {
     edge_smoke_retry() { printf '%s\n' edge_smoke_retry >> "$log_file"; return 0; }
     flock() { return 0; }
     deploy "$good_ref" "$good_sha"
-  ) 2>/dev/null
+  ) 2>/dev/null; then
+    die "self-test accepted a final state save failure"
+  fi
   [[ "$(cat "$NGINX_UPSTREAM_INCLUDE_HOST")" == "$(nginx_include_line "$SLOT_A")" ]]
   grep -q 'save_state 3' "$log_file"
   [[ "$(grep -c "exec $NGINX nginx -s reload" "$log_file")" == 2 ]]
@@ -886,7 +911,7 @@ self_test() {
     'pending_rollback_image=' \
     'pending_rollback_revision=' \
     'pending_rollback_ref=' > "$STATE_FILE"
-  ! (
+  if (
     save_state() {
       printf '%s\n' save_state >> "$log_file"
       return 1
@@ -917,7 +942,9 @@ self_test() {
     edge_smoke() { return 1; }
     flock() { return 0; }
     deploy "$good_ref" "$good_sha"
-  ) 2>/dev/null
+  ) 2>/dev/null; then
+    die "self-test accepted a pending rollback save failure"
+  fi
   [[ "$(cat "$NGINX_UPSTREAM_INCLUDE_HOST")" == "$(nginx_include_line "$SLOT_A")" ]]
   grep -q '^save_state$' "$log_file"
   grep -q "rm -f $SLOT_B" "$log_file"

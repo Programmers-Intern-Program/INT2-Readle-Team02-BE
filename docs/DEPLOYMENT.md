@@ -45,7 +45,7 @@ Install the shipped helper once on the EC2 host before enabling CI deployment:
 
 ```bash
 sudo install -d -o root -g root -m 0755 /usr/local/libexec/readle-backend
-sudo install -o root -g root -m 0755 backend/ops/backend/deploy-backend.sh /usr/local/libexec/readle-backend/deploy-backend
+sudo install -o root -g root -m 0755 ops/backend/deploy-backend.sh /usr/local/libexec/readle-backend/deploy-backend
 ```
 
 After bootstrap, normal deployment is only the GitHub Actions image publish and CI invocation of `/usr/local/libexec/readle-backend/deploy-backend` with the immutable image digest and matching Git revision. Normal deployment must not run `git pull`, Gradle, or a host-side image build.
