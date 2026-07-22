@@ -665,4 +665,130 @@ class ContentServiceTest {
     assertThat(response.errorCode()).isEqualTo("AI_SERVICE_ERROR");
     assertThat(response.message()).isEqualTo("AI 검증 서비스에 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   }
+
+  @Test
+  @DisplayName("재시도 시 memberUuid가 null이면 UNAUTHORIZED 예외가 발생한다")
+  void retryValidation_nullMemberUuid_throwsUnauthorized() {
+    assertThatThrownBy(() -> contentService.retryValidation(1L, null))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(GlobalErrorCode.UNAUTHORIZED);
+  }
+
+  @Test
+  @DisplayName("재시도 시 콘텐츠가 없으면 CONTENT_NOT_FOUND 예외가 발생한다")
+  void retryValidation_contentNotFound() {
+    String memberUuid = UUID.randomUUID().toString();
+    when(contentRepository.findByIdWithPessimisticLock(1L)).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> contentService.retryValidation(1L, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.CONTENT_NOT_FOUND);
+  }
+
+  @Test
+  @DisplayName("타인의 콘텐츠를 재시도하면 CONTENT_ACCESS_DENIED 예외가 발생한다")
+  void retryValidation_forbidden() {
+    String requesterUuid = UUID.randomUUID().toString();
+    String ownerUuid = UUID.randomUUID().toString();
+    Content content = mockOwnedContent(ownerUuid);
+
+    when(contentRepository.findByIdWithPessimisticLock(1L)).thenReturn(Optional.of(content));
+
+    assertThatThrownBy(() -> contentService.retryValidation(1L, requesterUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.CONTENT_ACCESS_DENIED);
+  }
+
+  @Test
+  @DisplayName("재시도 시 검증 이력이 없으면 CONTENT_VALIDATION_NOT_FOUND 예외가 발생한다")
+  void retryValidation_validationNotFound() {
+    String memberUuid = UUID.randomUUID().toString();
+    Content content = mockOwnedContent(memberUuid);
+
+    when(contentRepository.findByIdWithPessimisticLock(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> contentService.retryValidation(1L, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.CONTENT_VALIDATION_NOT_FOUND);
+  }
+
+  @Test
+  @DisplayName("재시도 시 상태가 PENDING이면 VALIDATION_ALREADY_RUNNING 예외가 발생한다")
+  void retryValidation_pending_throwsConflict() {
+    String memberUuid = UUID.randomUUID().toString();
+    Content content = mockOwnedContent(memberUuid);
+    ContentValidation validation =
+        ContentValidation.builder().status(ValidationStatus.PENDING).build();
+
+    when(contentRepository.findByIdWithPessimisticLock(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    assertThatThrownBy(() -> contentService.retryValidation(1L, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.VALIDATION_ALREADY_RUNNING);
+  }
+
+  @Test
+  @DisplayName("재시도 시 상태가 PASSED이면 NOT_RETRYABLE 예외가 발생한다")
+  void retryValidation_passed_throwsNotRetryable() {
+    String memberUuid = UUID.randomUUID().toString();
+    Content content = mockOwnedContent(memberUuid);
+    ContentValidation validation =
+        ContentValidation.builder().status(ValidationStatus.PASSED).build();
+
+    when(contentRepository.findByIdWithPessimisticLock(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    assertThatThrownBy(() -> contentService.retryValidation(1L, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.NOT_RETRYABLE);
+  }
+
+  @Test
+  @DisplayName("재시도 시 상태가 REJECTED이면 NOT_RETRYABLE 예외가 발생한다")
+  void retryValidation_rejected_throwsNotRetryable() {
+    String memberUuid = UUID.randomUUID().toString();
+    Content content = mockOwnedContent(memberUuid);
+    ContentValidation validation =
+        ContentValidation.builder().status(ValidationStatus.REJECTED).build();
+
+    when(contentRepository.findByIdWithPessimisticLock(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    assertThatThrownBy(() -> contentService.retryValidation(1L, memberUuid))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(ContentErrorCode.NOT_RETRYABLE);
+  }
+
+  @Test
+  @DisplayName("재시도 시 상태가 FAILED이면 이벤트를 재발행하고 PENDING을 반환한다")
+  void retryValidation_failed_publishesEventAndReturnsPending() {
+    String memberUuid = UUID.randomUUID().toString();
+    Content content = mockOwnedContent(memberUuid);
+    ReflectionTestUtils.setField(content, "id", 1L); // ContentCreatedEvent uses content id
+
+    ContentValidation validation =
+        ContentValidation.builder().status(ValidationStatus.FAILED).build();
+
+    when(contentRepository.findByIdWithPessimisticLock(1L)).thenReturn(Optional.of(content));
+    when(contentValidationRepository.findFirstByContentIdOrderByCreatedAtDesc(1L))
+        .thenReturn(Optional.of(validation));
+
+    ContentValidationResponse response = contentService.retryValidation(1L, memberUuid);
+
+    assertThat(response.status()).isEqualTo(ValidationStatus.PENDING);
+    verify(eventPublisher).publishEvent(new ContentCreatedEvent(1L, memberUuid));
+  }
 }
