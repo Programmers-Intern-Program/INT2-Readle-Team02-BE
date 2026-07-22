@@ -90,8 +90,9 @@ class QuizSolveServiceTest {
     lenient().when(quizAttempt.getQuizSet()).thenReturn(quizSet);
     lenient().when(quizAttempt.getMember()).thenReturn(member);
     lenient().when(quizAttempt.getStatus()).thenReturn(AttemptStatus.IN_PROGRESS);
-    lenient().when(quizAttemptRepository.findById(200L)).thenReturn(Optional.of(quizAttempt));
-    lenient().when(quizAttemptRepository.findWithDetailsById(200L)).thenReturn(Optional.of(quizAttempt));
+    lenient()
+        .when(quizAttemptRepository.findWithDetailsById(200L))
+        .thenReturn(Optional.of(quizAttempt));
     lenient()
         .when(quizAttempt.getStartedAt())
         .thenReturn(java.time.LocalDateTime.now().minusMinutes(5));
@@ -166,6 +167,7 @@ class QuizSolveServiceTest {
 
     assertThat(response.getTotalCount()).isEqualTo(2);
     assertThat(response.getCorrectCount()).isEqualTo(2);
+    verify(quizAttemptRepository).findWithDetailsById(200L);
     verify(quizAttempt).markAsGrading();
     verify(quizAttempt).submit();
     verify(quizAnswerRepository, times(2)).saveAll(any());
