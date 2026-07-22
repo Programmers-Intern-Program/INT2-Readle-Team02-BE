@@ -1,13 +1,19 @@
 package com.realdev.readle.domain.quiz.controller;
 
+import com.realdev.readle.domain.quiz.dto.request.ResultReportHistoryRequest;
 import com.realdev.readle.domain.quiz.dto.response.QuizAttemptResultResponse;
+import com.realdev.readle.domain.quiz.dto.response.ResultReportHistoryResponse;
 import com.realdev.readle.domain.quiz.service.QuizSolveService;
+import com.realdev.readle.domain.quiz.service.ResultReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,6 +25,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class ResultReportController {
 
   private final QuizSolveService quizSolveService;
+  private final ResultReportService resultReportService;
+
+  @Operation(summary = "학습 히스토리 목록 조회", description = "로그인 사용자의 제출 완료 결과 리포트를 조회합니다.")
+  @GetMapping
+  public ResponseEntity<ResultReportHistoryResponse> getResultReports(
+      @AuthenticationPrincipal String memberUuid,
+      @Valid @ParameterObject @ModelAttribute ResultReportHistoryRequest request) {
+    return ResponseEntity.ok(
+        resultReportService.getHistory(
+            memberUuid, request.cursor(), request.size(), request.sort(), request.tagId()));
+  }
 
   @Operation(summary = "결과 리포트 상세 조회", description = "결과 리포트 ID로 퀴즈 풀이 결과를 조회합니다.")
   @GetMapping("/{reportId}")

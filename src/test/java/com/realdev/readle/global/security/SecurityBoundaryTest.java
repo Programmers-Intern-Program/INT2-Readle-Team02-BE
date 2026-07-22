@@ -220,6 +220,16 @@ class SecurityBoundaryTest {
   }
 
   @Test
+  void deniesAnonymousAccessToResultReportHistoryWithJsonUnauthorizedResponse() throws Exception {
+    mockMvc
+        .perform(get("/api/result-reports"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"))
+        .andExpect(jsonPath("$.error.details").isArray());
+  }
+
+  @Test
   void deniesFallbackRoutesWithJsonUnauthorizedResponse() throws Exception {
     mockMvc
         .perform(get("/private"))
