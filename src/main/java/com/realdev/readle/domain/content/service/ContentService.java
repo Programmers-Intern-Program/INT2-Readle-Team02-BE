@@ -21,7 +21,6 @@ import com.realdev.readle.global.exception.GlobalErrorCode;
 import com.realdev.readle.global.util.crawler.WebCrawler;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -68,7 +67,7 @@ public class ContentService {
   @Transactional(readOnly = true)
   public ContentValidationResponse getValidationResult(Long contentId, String memberUuid) {
     validateAuthentication(memberUuid);
-    validateContentOwnership(contentId, memberUuid);
+    getOwnedContent(contentId, memberUuid);
     ContentValidation validation = getLatestValidation(contentId);
 
     // bypassAvailable 조건 계산
@@ -103,7 +102,7 @@ public class ContentService {
   @Transactional
   public ContentValidationResponse retryValidation(Long contentId, String memberUuid) {
     validateAuthentication(memberUuid);
-    validateContentOwnership(contentId, memberUuid);
+    Content content = getOwnedContent(contentId, memberUuid);
 
     ContentValidation validation = getLatestValidation(contentId);
 
@@ -115,10 +114,26 @@ public class ContentService {
       throw new CustomException(ContentErrorCode.NOT_RETRYABLE);
     }
 
+    // 프론트엔드 폴링 Race Condition을 막기 위해 PENDING 이력을 즉시 DB에 저장
+    ContentValidation pendingValidation =
+        ContentValidation.builder()
+            .content(content)
+            .status(ValidationStatus.PENDING)
+            .validationMethod(ValidationMethod.AI)
+            .build();
+    contentValidationRepository.save(pendingValidation);
+
+    // 비동기 검증 파이프라인 재트리거 (실제 가드레일 -> AI 로직 수행)
     eventPublisher.publishEvent(new ContentCreatedEvent(contentId, memberUuid));
 
     return new ContentValidationResponse(
-        contentId, ValidationStatus.PENDING, null, null, false, LocalDateTime.now(), null);
+        contentId,
+        ValidationStatus.PENDING,
+        null,
+        null,
+        false,
+        pendingValidation.getCreatedAt(),
+        null);
   }
 
   private void validateAuthentication(String memberUuid) {
@@ -207,7 +222,7 @@ public class ContentService {
     return text.substring(0, Math.min(TITLE_FALLBACK_LENGTH, text.length()));
   }
 
-  private void validateContentOwnership(Long contentId, String memberUuid) {
+  private Content getOwnedContent(Long contentId, String memberUuid) {
     Content content =
         contentRepository
             .findById(contentId)
@@ -215,6 +230,7 @@ public class ContentService {
     if (!content.getMember().getUuid().equals(memberUuid)) {
       throw new CustomException(ContentErrorCode.CONTENT_ACCESS_DENIED);
     }
+    return content;
   }
 
   private ContentValidation getLatestValidation(Long contentId) {
