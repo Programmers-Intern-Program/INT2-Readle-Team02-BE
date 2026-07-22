@@ -127,8 +127,11 @@ public class ClaudeClient {
       return response;
     } catch (org.springframework.web.client.RestClientResponseException e) {
       String responseBody = e.getResponseBodyAsString();
-      if (responseBody != null && responseBody.length() > 200) {
-        responseBody = responseBody.substring(0, 200) + "... (truncated)";
+      if (responseBody != null) {
+        responseBody = responseBody.replaceAll("[\\r\\n\\t]", " ").trim();
+        if (responseBody.length() > 200) {
+          responseBody = responseBody.substring(0, 200) + "... (truncated)";
+        }
       }
       log.error("[CLAUDE_API_ERROR] Claude API HTTP 오류: {}", responseBody);
       throw e;

@@ -10,8 +10,8 @@ import static org.mockito.Mockito.lenient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.realdev.readle.domain.content.entity.Content;
 import com.realdev.readle.domain.content.entity.ContentValidation;
-import com.realdev.readle.domain.content.entity.ValidationStatus;
 import com.realdev.readle.domain.content.entity.ValidationMethod;
+import com.realdev.readle.domain.content.entity.ValidationStatus;
 import com.realdev.readle.domain.content.repository.ContentValidationRepository;
 import com.realdev.readle.domain.member.entity.Member;
 import com.realdev.readle.domain.quiz.dto.response.QuizCreateResponse;
@@ -99,14 +99,6 @@ class QuizGenerationServiceTest {
     given(contentValidationRepository.findByIdWithContent(100L))
         .willReturn(Optional.of(validation));
 
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
-
     QuizSet expectedQuizSet = QuizSet.create(content, validation, false);
     ReflectionTestUtils.setField(expectedQuizSet, "id", 200L);
     given(quizSetRepository.saveAndFlush(any(QuizSet.class))).willReturn(expectedQuizSet);
@@ -159,14 +151,6 @@ class QuizGenerationServiceTest {
     QuizSet existingQuizSet = org.mockito.Mockito.spy(QuizSet.create(content, validation, false));
     existingQuizSet.fail(); // FAILED 상태로 만듦
     ReflectionTestUtils.setField(existingQuizSet, "id", 300L);
-
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
 
     // 기존 QuizSet 반환하도록 모킹
     given(quizSetRepository.findBySourceValidationId(100L))
@@ -225,14 +209,6 @@ class QuizGenerationServiceTest {
     ReflectionTestUtils.setField(
         existingQuizSet, "completedAt", java.time.LocalDateTime.now().minusDays(1));
 
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
-
     // 기존 QuizSet 반환하도록 모킹
     given(quizSetRepository.findBySourceValidationId(100L))
         .willReturn(Optional.of(existingQuizSet));
@@ -288,7 +264,9 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenPending() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.PENDING);
-    org.mockito.BDDMockito.lenient().when(validation.getValidationMethod()).thenReturn(ValidationMethod.STATIC_GUARDRAIL);
+    org.mockito.BDDMockito.lenient()
+        .when(validation.getValidationMethod())
+        .thenReturn(ValidationMethod.STATIC_GUARDRAIL);
     given(contentValidationRepository.findByIdWithContent(100L))
         .willReturn(Optional.of(validation));
 
@@ -304,7 +282,9 @@ class QuizGenerationServiceTest {
   void createQuizSet_ThrowsWhenFailed() {
     // given
     given(validation.getStatus()).willReturn(ValidationStatus.FAILED);
-    org.mockito.BDDMockito.lenient().when(validation.getValidationMethod()).thenReturn(ValidationMethod.STATIC_GUARDRAIL);
+    org.mockito.BDDMockito.lenient()
+        .when(validation.getValidationMethod())
+        .thenReturn(ValidationMethod.STATIC_GUARDRAIL);
     given(contentValidationRepository.findByIdWithContent(100L))
         .willReturn(Optional.of(validation));
 
@@ -324,14 +304,6 @@ class QuizGenerationServiceTest {
         .willReturn(Optional.of(validation));
     org.mockito.BDDMockito.lenient().when(content.getRawText()).thenReturn("   ");
     org.mockito.BDDMockito.lenient().when(content.getExtractedText()).thenReturn("   ");
-
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
 
     given(quizSetRepository.findBySourceValidationId(100L)).willReturn(Optional.empty());
 
@@ -358,14 +330,6 @@ class QuizGenerationServiceTest {
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
     given(contentValidationRepository.findByIdWithContent(100L))
         .willReturn(Optional.of(validation));
-
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
 
     QuizSet expectedQuizSet = QuizSet.create(content, validation, false);
     ReflectionTestUtils.setField(expectedQuizSet, "id", 200L);
@@ -406,14 +370,6 @@ class QuizGenerationServiceTest {
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
     given(contentValidationRepository.findByIdWithContent(100L))
         .willReturn(Optional.of(validation));
-
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
 
     QuizSet expectedQuizSet = QuizSet.create(content, validation, false);
     ReflectionTestUtils.setField(expectedQuizSet, "id", 200L);
@@ -456,14 +412,6 @@ class QuizGenerationServiceTest {
     given(contentValidationRepository.findByIdWithContent(100L))
         .willReturn(Optional.of(validation));
 
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
-
     QuizSet expectedQuizSet = QuizSet.create(content, validation, false);
     ReflectionTestUtils.setField(expectedQuizSet, "id", 200L);
     given(quizSetRepository.saveAndFlush(any(QuizSet.class))).willReturn(expectedQuizSet);
@@ -503,14 +451,6 @@ class QuizGenerationServiceTest {
     given(validation.getStatus()).willReturn(ValidationStatus.PASSED);
     given(contentValidationRepository.findByIdWithContent(100L))
         .willReturn(Optional.of(validation));
-
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
 
     QuizSet expectedQuizSet = QuizSet.create(content, validation, false);
     ReflectionTestUtils.setField(expectedQuizSet, "id", 200L);
@@ -556,14 +496,6 @@ class QuizGenerationServiceTest {
     org.mockito.BDDMockito.lenient()
         .when(content.getRawText())
         .thenReturn("이것은 코드가 전혀 없는 순수 텍스트 본문입니다.");
-
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
 
     QuizSet expectedQuizSet = QuizSet.create(content, validation, false);
     ReflectionTestUtils.setField(expectedQuizSet, "id", 200L);
@@ -619,14 +551,6 @@ class QuizGenerationServiceTest {
         .when(contentValidationRepository.findByIdWithContent(100L))
         .thenReturn(Optional.of(validation));
 
-    given(transactionTemplate.execute(any()))
-        .willAnswer(
-            invocation -> {
-              org.springframework.transaction.support.TransactionCallback callback =
-                  invocation.getArgument(0);
-              return callback.doInTransaction(null);
-            });
-
     given(quizSetRepository.findBySourceValidationId(100L)).willReturn(Optional.empty());
 
     // saveAndFlush 될 때 isBypassed가 true인지 검증
@@ -681,6 +605,23 @@ class QuizGenerationServiceTest {
     // given
     lenient().when(validation.getStatus()).thenReturn(ValidationStatus.REJECTED);
     lenient().when(validation.getValidationMethod()).thenReturn(ValidationMethod.STATIC_GUARDRAIL);
+    lenient()
+        .when(contentValidationRepository.findByIdWithContent(100L))
+        .thenReturn(Optional.of(validation));
+
+    // when & then
+    assertThatThrownBy(() -> quizGenerationService.createQuizSet(100L))
+        .isInstanceOf(CustomException.class)
+        .extracting("errorCode")
+        .isEqualTo(QuizErrorCode.VALIDATION_NOT_PASSED);
+  }
+
+  @Test
+  @DisplayName("AI 검증 방식이어도 ValidationStatus가 FAILED인 경우 우회 생성이 불가하며 예외가 발생한다")
+  void createQuizSet_ThrowsException_WhenAiFailed() {
+    // given
+    lenient().when(validation.getStatus()).thenReturn(ValidationStatus.FAILED);
+    lenient().when(validation.getValidationMethod()).thenReturn(ValidationMethod.AI);
     lenient()
         .when(contentValidationRepository.findByIdWithContent(100L))
         .thenReturn(Optional.of(validation));
