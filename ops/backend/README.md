@@ -33,6 +33,44 @@ sudo install -o root -g root -m 0755 ./deploy-backend.sh /usr/local/libexec/read
 CI가 publish된 immutable image digest와 일치하는 Git revision을 설치된 헬퍼에
 전달합니다.
 
+## EC2 runtime 복구 검증
+
+Reboot 복구 검증은 별도 oneshot unit인 `readle-runtime-verify.service`가 수행합니다.
+백엔드 헬퍼는 backend slot topology 검증만 소유하고, host service 상태나 frontend,
+MySQL 검증은 wrapper가 소유합니다.
+
+최초 설치 순서는 다음만 허용합니다.
+
+1. `/usr/local/libexec/readle-runtime-verify.candidate.<UTC>`에 candidate wrapper를
+   stage합니다.
+2. `sudo READLE_MYSQL_CONTAINER=readle-mysql /usr/local/libexec/readle-runtime-verify.candidate.<UTC> --preflight`를 실행합니다.
+3. Preflight 통과 후 live backend helper, wrapper, forwarder, verifier unit의 기존 파일을
+   timestamp backup합니다.
+4. `deploy-backend`와 candidate를 `/usr/local/libexec` live 경로로 승격하고
+   `/etc/systemd/system/readle-runtime-verify.service`를 설치합니다.
+5. `systemctl daemon-reload` 후 `podman-restart.service`,
+   `readle-podman-forward.service`, `readle-runtime-verify.service`를 enable합니다.
+6. 즉시 검증이 필요할 때만 `systemctl start readle-runtime-verify.service`를 실행합니다.
+
+표준 host의 MySQL 대상은 literal `readle-mysql`입니다. 이름이 다른 host만
+`READLE_MYSQL_CONTAINER`를 명시하고, wrapper는 resolved target 하나가 실행 중이고
+`readle-private` only이며 `restart=always`인지 확인합니다. MySQL container를 검색하지
+않습니다.
+
+`podman-restart.service`는 `/usr/lib/systemd/system/podman-restart.service` vendor
+unit을 enable만 합니다. `/etc/systemd/system`으로 복사하거나 수정하지 않습니다.
+
+수동 검증과 장애 진단은 다음 명령을 사용합니다.
+
+```sh
+sudo systemctl start readle-runtime-verify.service
+sudo journalctl -u readle-runtime-verify.service -b --no-pager
+```
+
+Verifier가 실패해도 컨테이너 restart/remove, Nginx reload, deploy state 수정은 자동으로
+수행하지 않습니다. 운영자는 journal의 실패 invariant를 확인한 뒤 기존 배포/복구
+절차로 수동 처리합니다.
+
 ## Nginx upstream include 초기화
 
 헬퍼는 호스트 측 include 파일 하나를 갱신하며, Nginx 컨테이너가 bind mount를 통해
@@ -87,6 +125,9 @@ sudo ./deploy-backend.sh \
 - `/run/lock/readle-candidate-deploy.lock`: 다른 candidate 방식 app 배포와의 동시
   실행을 막는 공용 candidate 잠금입니다.
 - `/run/lock/readle-backend-deploy.lock`: 백엔드 배포 전용 잠금입니다.
+
+Runtime verifier도 공용 candidate 잠금을 최대 30초 대기합니다. frontend 또는 backend
+배포 중 수동 verifier 실행은 timeout으로 실패할 수 있으므로, 배포 완료 후 다시 실행합니다.
 
 ## Rollback 동작
 
