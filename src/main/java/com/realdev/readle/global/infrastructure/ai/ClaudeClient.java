@@ -126,7 +126,11 @@ public class ClaudeClient {
       log.debug("[CLAUDE_API_RESPONSE] 정상적으로 응답을 수신했습니다.");
       return response;
     } catch (org.springframework.web.client.RestClientResponseException e) {
-      log.error("[CLAUDE_API_ERROR] Claude API HTTP 오류: {}", e.getResponseBodyAsString());
+      String responseBody = e.getResponseBodyAsString();
+      if (responseBody != null && responseBody.length() > 200) {
+        responseBody = responseBody.substring(0, 200) + "... (truncated)";
+      }
+      log.error("[CLAUDE_API_ERROR] Claude API HTTP 오류: {}", responseBody);
       throw e;
     }
   }
