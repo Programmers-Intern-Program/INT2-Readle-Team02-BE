@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PODMAN="${READLE_PODMAN:-podman}"
+SYSTEMCTL="${READLE_SYSTEMCTL:-systemctl}"
+FLOCK="${READLE_FLOCK:-flock}"
+BACKEND_HELPER="${READLE_BACKEND_HELPER:-/usr/local/libexec/readle-backend/deploy-backend}"
+CANDIDATE_LOCK_FILE="${READLE_CANDIDATE_LOCK_FILE:-/run/lock/readle-candidate-deploy.lock}"
+CANDIDATE_LOCK_WAIT="${READLE_CANDIDATE_LOCK_WAIT:-30}"
+NGINX_CONTAINER="${READLE_NGINX_CONTAINER:-readle-nginx}"
+FRONTEND_CONTAINER="${READLE_FRONTEND_CONTAINER:-readle-frontend}"
+MYSQL_CONTAINER="${READLE_MYSQL_CONTAINER:-readle-mysql}"
+PUBLIC_NETWORK="${READLE_PUBLIC_NETWORK:-readle-public}"
+PRIVATE_NETWORK="${READLE_PRIVATE_NETWORK:-readle-private}"
+PODMAN_RESTART_SERVICE="${READLE_PODMAN_RESTART_SERVICE:-podman-restart.service}"
+FORWARD_SERVICE="${READLE_FORWARD_SERVICE:-readle-podman-forward.service}"
+
+log() { printf '%s\n' "$*" >&2; }
+die() { log "error: $*"; exit 1; }
+
+podman_cmd() {
+  "${READLE_PODMAN:-$PODMAN}" "$@"
+}
+
+systemctl_cmd() {
+  "${READLE_SYSTEMCTL:-$SYSTEMCTL}" "$@"
+}
+
+flock_cmd() {
+  "${READLE_FLOCK:-$FLOCK}" "$@"
+}
+
+mysql_container() {
+  printf '%s\n' "${READLE_MYSQL_CONTAINER:-$MYSQL_CONTAINER}"
+}
+
+container_running() {
+  [[ "$(podman_cmd inspect "$1" --format '{{.State.Running}}' 2>/dev/null || true)" == "true" ]]
+}
+
+container_restart_policy() {
+  podman_cmd inspect "$1" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null || true
+}
+
+container_networks() {
+  podman_cmd inspect "$1" --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' 2>/dev/null || true
+}
+
+network_exists() {
+  podman_cmd network inspect "$1" >/dev/null
+}
+
+network_set_is() {
+  local container="$1" expected="$2" network count=0
+  for network in $(container_networks "$container"); do
+    [[ "$network" == "$expected" ]] || return 1
+    ((count += 1))
+  done
+  [[ "$count" -eq 1 ]]
+}
+
+validate_container() {
+  local name="$1" network="$2" restart="${3:-}"
+  container_running "$name" || die "$name is not running"
+  network_set_is "$name" "$network" || die "$name has unexpected network attachments"
+  if [[ -n "$restart" ]]; then
+    [[ "$(container_restart_policy "$name")" == "$restart" ]] || die "$name restart policy is not $restart"
+  fi
+}
+
+verify_host_surface() {
+  local mysql
+  mysql="$(mysql_container)"
+  command -v "${READLE_PODMAN:-$PODMAN}" >/dev/null || die "missing podman command: ${READLE_PODMAN:-$PODMAN}"
+  command -v "${READLE_SYSTEMCTL:-$SYSTEMCTL}" >/dev/null || die "missing systemctl command: ${READLE_SYSTEMCTL:-$SYSTEMCTL}"
+  network_exists "$PUBLIC_NETWORK" || die "missing Podman network: $PUBLIC_NETWORK"
+  network_exists "$PRIVATE_NETWORK" || die "missing Podman network: $PRIVATE_NETWORK"
+  validate_container "${READLE_NGINX_CONTAINER:-$NGINX_CONTAINER}" "$PUBLIC_NETWORK"
+  validate_container "${READLE_FRONTEND_CONTAINER:-$FRONTEND_CONTAINER}" "$PUBLIC_NETWORK" always
+  validate_container "$mysql" "$PRIVATE_NETWORK" always
+}
+
+verify_preflight() {
+  verify_host_surface
+  log "preflight ok: mysql=$(mysql_container)"
+}
+
+verify_systemd_state() {
+  systemctl_cmd cat "$PODMAN_RESTART_SERVICE" >/dev/null || die "missing $PODMAN_RESTART_SERVICE"
+  systemctl_cmd is-enabled --quiet "$PODMAN_RESTART_SERVICE" || die "$PODMAN_RESTART_SERVICE is not enabled"
+  systemctl_cmd is-active --quiet "$PODMAN_RESTART_SERVICE" || die "$PODMAN_RESTART_SERVICE is not active"
+  systemctl_cmd is-enabled --quiet "$FORWARD_SERVICE" || die "$FORWARD_SERVICE is not enabled"
+  systemctl_cmd is-active --quiet "$FORWARD_SERVICE" || die "$FORWARD_SERVICE is not active"
+}
+
+verify_runtime_locked() {
+  verify_systemd_state
+  verify_host_surface
+  [[ -x "${READLE_BACKEND_HELPER:-$BACKEND_HELPER}" ]] || die "missing executable backend helper: ${READLE_BACKEND_HELPER:-$BACKEND_HELPER}"
+  "${READLE_BACKEND_HELPER:-$BACKEND_HELPER}" --verify-backend-topology
+  log "runtime verify ok: mysql=$(mysql_container)"
+}
+
+verify_runtime() {
+  local lock_file lock_wait
+  lock_file="${READLE_CANDIDATE_LOCK_FILE:-$CANDIDATE_LOCK_FILE}"
+  lock_wait="${READLE_CANDIDATE_LOCK_WAIT:-$CANDIDATE_LOCK_WAIT}"
+  exec 8>"$lock_file"
+  flock_cmd -w "$lock_wait" -x 8 || die "timed out waiting ${lock_wait}s for candidate deployment lock"
+  verify_runtime_locked
+}
+
+self_test() {
+  local tmp bin log_file helper_log lock_file first_call
+  tmp="$(mktemp -d)"
+  bin="$tmp/bin"
+  mkdir -p "$bin"
+  log_file="$tmp/calls.log"
+  helper_log="$tmp/helper.log"
+  lock_file="$tmp/candidate.lock"
+
+  cat > "$bin/podman" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'podman %s\n' "$*" >> "$READLE_STUB_LOG"
+case "$*" in
+  "network inspect readle-public"|"network inspect readle-private") exit 0 ;;
+  "inspect readle-nginx --format {{.State.Running}}"|"inspect readle-frontend --format {{.State.Running}}"|"inspect readle-mysql --format {{.State.Running}}"|"inspect frontend-extra --format {{.State.Running}}"|"inspect mysql-extra --format {{.State.Running}}") printf 'true\n'; exit 0 ;;
+  "inspect missing --format {{.State.Running}}") printf 'false\n'; exit 0 ;;
+  "inspect readle-nginx --format {{range \$name, \$_ := .NetworkSettings.Networks}}{{\$name}} {{end}}"|"inspect readle-frontend --format {{range \$name, \$_ := .NetworkSettings.Networks}}{{\$name}} {{end}}") printf 'readle-public \n'; exit 0 ;;
+  "inspect readle-mysql --format {{range \$name, \$_ := .NetworkSettings.Networks}}{{\$name}} {{end}}") printf 'readle-private \n'; exit 0 ;;
+  "inspect frontend-extra --format {{range \$name, \$_ := .NetworkSettings.Networks}}{{\$name}} {{end}}") printf 'readle-public readle-extra \n'; exit 0 ;;
+  "inspect mysql-extra --format {{range \$name, \$_ := .NetworkSettings.Networks}}{{\$name}} {{end}}") printf 'readle-private readle-extra \n'; exit 0 ;;
+  "inspect missing --format {{range \$name, \$_ := .NetworkSettings.Networks}}{{\$name}} {{end}}") exit 0 ;;
+  "inspect readle-mysql --format {{.HostConfig.RestartPolicy.Name}}") printf 'always\n'; exit 0 ;;
+  "inspect readle-frontend --format {{.HostConfig.RestartPolicy.Name}}"|"inspect frontend-extra --format {{.HostConfig.RestartPolicy.Name}}"|"inspect mysql-extra --format {{.HostConfig.RestartPolicy.Name}}") printf 'always\n'; exit 0 ;;
+  "inspect missing --format {{.HostConfig.RestartPolicy.Name}}") exit 0 ;;
+esac
+printf 'unexpected podman call: %s\n' "$*" >&2
+exit 2
+STUB
+  chmod +x "$bin/podman"
+
+  cat > "$bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'systemctl %s\n' "$*" >> "$READLE_STUB_LOG"
+case "$*" in
+  "cat podman-restart.service"|"is-enabled --quiet podman-restart.service"|"is-active --quiet podman-restart.service"|"is-enabled --quiet readle-podman-forward.service"|"is-active --quiet readle-podman-forward.service") exit 0 ;;
+esac
+printf 'unexpected systemctl call: %s\n' "$*" >&2
+exit 2
+STUB
+  chmod +x "$bin/systemctl"
+
+  cat > "$bin/flock" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'flock %s\n' "$*" >> "$READLE_STUB_LOG"
+[[ "$*" != "-w 0 -x 8" ]]
+STUB
+  chmod +x "$bin/flock"
+
+  cat > "$tmp/deploy-backend.sh" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$READLE_HELPER_LOG"
+[[ "$*" == "--verify-backend-topology" ]]
+STUB
+  chmod +x "$tmp/deploy-backend.sh"
+
+  READLE_PODMAN="$bin/podman" \
+    READLE_SYSTEMCTL="$bin/systemctl" \
+    READLE_FLOCK="$bin/flock" \
+    READLE_BACKEND_HELPER="$tmp/deploy-backend.sh" \
+    READLE_CANDIDATE_LOCK_FILE="$lock_file" \
+    READLE_STUB_LOG="$log_file" \
+    READLE_HELPER_LOG="$helper_log" \
+    verify_preflight
+  [[ ! -e "$helper_log" ]] || die "self-test preflight invoked backend helper"
+  ! grep -Eq 'systemctl|flock|--verify-backend-topology' "$log_file" || die "self-test preflight was not lock-free/prereq-only"
+
+  : > "$log_file"
+  READLE_PODMAN="$bin/podman" \
+    READLE_SYSTEMCTL="$bin/systemctl" \
+    READLE_FLOCK="$bin/flock" \
+    READLE_BACKEND_HELPER="$tmp/deploy-backend.sh" \
+    READLE_CANDIDATE_LOCK_FILE="$lock_file" \
+    READLE_STUB_LOG="$log_file" \
+    READLE_HELPER_LOG="$helper_log" \
+    verify_runtime
+  IFS= read -r first_call < "$log_file"
+  [[ "$first_call" == "flock -w 30 -x 8" ]] || die "self-test observed host checks before candidate lock"
+  grep -qx -- "--verify-backend-topology" "$helper_log" || die "self-test did not invoke backend topology verifier"
+  ! grep -Eiq 'podman (run|rm|stop|restart|start|network connect|network disconnect)|systemctl (start|restart|reload|enable|disable|daemon-reload)' "$log_file" || die "self-test observed a mutation command"
+
+  if (READLE_PODMAN="$bin/podman" \
+    READLE_SYSTEMCTL="$bin/systemctl" \
+    READLE_STUB_LOG="$log_file" \
+    READLE_MYSQL_CONTAINER=missing \
+    verify_preflight 2>/dev/null); then
+    die "self-test accepted invalid resolved MySQL"
+  fi
+
+  if (READLE_PODMAN="$bin/podman" \
+    READLE_SYSTEMCTL="$bin/systemctl" \
+    READLE_STUB_LOG="$log_file" \
+    READLE_FRONTEND_CONTAINER=frontend-extra \
+    verify_preflight 2>/dev/null); then
+    die "self-test accepted frontend extra network"
+  fi
+
+  if (READLE_PODMAN="$bin/podman" \
+    READLE_SYSTEMCTL="$bin/systemctl" \
+    READLE_STUB_LOG="$log_file" \
+    READLE_MYSQL_CONTAINER=mysql-extra \
+    verify_preflight 2>/dev/null); then
+    die "self-test accepted MySQL extra network"
+  fi
+
+  : > "$log_file"
+  : > "$helper_log"
+  if (READLE_PODMAN="$bin/podman" \
+    READLE_SYSTEMCTL="$bin/systemctl" \
+    READLE_FLOCK="$bin/flock" \
+    READLE_BACKEND_HELPER="$tmp/deploy-backend.sh" \
+    READLE_CANDIDATE_LOCK_FILE="$lock_file" \
+    READLE_CANDIDATE_LOCK_WAIT=0 \
+    READLE_STUB_LOG="$log_file" \
+    READLE_HELPER_LOG="$helper_log" \
+    verify_runtime 2>/dev/null); then
+    die "self-test accepted candidate lock timeout"
+  fi
+  [[ "$(cat "$log_file")" == "flock -w 0 -x 8" ]] || die "self-test lock timeout performed host observations"
+  [[ ! -s "$helper_log" ]] || die "self-test lock timeout invoked backend helper"
+
+  printf '%s\n' "self-test passed"
+}
+
+case "${1:-}" in
+  --self-test) self_test ;;
+  --preflight) verify_preflight ;;
+  "") verify_runtime ;;
+  *) printf 'usage: %s [--preflight|--self-test]\n' "$0" >&2; exit 64 ;;
+esac

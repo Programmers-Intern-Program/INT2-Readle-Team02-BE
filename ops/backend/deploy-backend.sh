@@ -208,6 +208,10 @@ container_exists() {
   podman_cmd container exists "$1"
 }
 
+container_running() {
+  [[ "$(podman_cmd inspect "$1" --format '{{.State.Running}}' 2>/dev/null || true)" == "true" ]]
+}
+
 container_image_id() {
   podman_cmd inspect "$1" --format '{{.Image}}' 2>/dev/null || true
 }
@@ -222,6 +226,23 @@ container_networks() {
 
 container_attached_to_network() {
   [[ " $(container_networks "$1") " == *" $2 "* ]]
+}
+
+container_attached_only_to_networks() {
+  local name="$1"
+  shift
+  local networks network expected
+  networks="$(container_networks "$name")"
+  for expected in "$@"; do
+    [[ " $networks " == *" $expected "* ]] || return 1
+  done
+  for network in $networks; do
+    local matched=0
+    for expected in "$@"; do
+      [[ "$network" == "$expected" ]] && matched=1
+    done
+    [[ "$matched" == 1 ]] || return 1
+  done
 }
 
 image_revision() {
@@ -244,6 +265,10 @@ memory_limit_bytes() {
 
 container_memory_limit() {
   podman_cmd inspect "$1" --format '{{.HostConfig.Memory}}' 2>/dev/null || true
+}
+
+container_restart_policy() {
+  podman_cmd inspect "$1" --format '{{.HostConfig.RestartPolicy.Name}}' 2>/dev/null || true
 }
 
 container_published_ports() {
@@ -385,6 +410,41 @@ validate_bootstrap_preflight() {
   [[ "$(container_image_id "$active_slot")" == "$last_good_image" ]] || die "active container image does not match state"
   [[ "$(container_deploy_ref "$active_slot")" == "$last_good_ref" ]] || die "active container ref does not match state"
   [[ "$(container_revision "$active_slot" 2>/dev/null || true)" == "$last_good_revision" ]] || die "active container revision does not match state"
+}
+
+validate_backend_topology() {
+  local include_line include_slot inactive
+  validate_nginx_include_path "$NGINX_UPSTREAM_INCLUDE" || die "invalid Nginx include path"
+  validate_nginx_include_path "$NGINX_UPSTREAM_INCLUDE_HOST" || die "invalid host Nginx include path"
+  [[ -f "$NGINX_UPSTREAM_INCLUDE_HOST" ]] || die "missing host Nginx upstream include: $NGINX_UPSTREAM_INCLUDE_HOST"
+  container_exists "$NGINX" || die "missing Nginx container: $NGINX"
+  container_exists "$active_slot" || die "missing active backend slot: $active_slot"
+  container_running "$active_slot" || die "active backend slot is not running: $active_slot"
+  inactive="$(inactive_slot "$active_slot")"
+  ! container_exists "$inactive" || die "inactive backend slot must be absent: $inactive"
+  [[ -z "$(container_published_ports "$active_slot")" ]] || die "$active_slot must not publish host ports"
+  [[ "$(container_memory_limit "$active_slot")" == "$(memory_limit_bytes)" ]] || die "$active_slot memory limit does not match $MEMORY_LIMIT"
+  [[ "$(container_restart_policy "$active_slot")" == "always" ]] || die "$active_slot restart policy is not always"
+  container_attached_only_to_networks "$NGINX" "$PUBLIC_NETWORK" || die "$NGINX must attach only to $PUBLIC_NETWORK"
+  container_attached_only_to_networks "$active_slot" "$PUBLIC_NETWORK" "$PRIVATE_NETWORK" || die "$active_slot must attach only to $PUBLIC_NETWORK and $PRIVATE_NETWORK"
+  nginx_references_include || die "Nginx config does not reference $NGINX_UPSTREAM_INCLUDE"
+  nginx_container_include_matches_host || die "host and container Nginx upstream includes differ"
+  include_line="$(read_nginx_include)" || die "missing Nginx upstream include: $NGINX_UPSTREAM_INCLUDE"
+  include_slot="$(current_include_slot "$include_line")" || die "Nginx upstream include has an unexpected target"
+  [[ "$include_slot" == "$active_slot" ]] || die "state active_slot does not match Nginx upstream include"
+  [[ "$(container_image_id "$active_slot")" == "$last_good_image" ]] || die "active container image does not match state"
+  [[ "$(container_deploy_ref "$active_slot")" == "$last_good_ref" ]] || die "active container ref does not match state"
+  [[ "$(container_revision "$active_slot" 2>/dev/null || true)" == "$last_good_revision" ]] || die "active container revision does not match state"
+}
+
+verify_backend_topology() {
+  exec 9>"$LOCK_FILE"
+  flock -w 30 -x 9 || die "timed out waiting 30 seconds for backend deployment lock"
+
+  load_image_prefix || die "missing or invalid image repository file: $IMAGE_REPOSITORY_FILE"
+  load_state || die "failed to load deployment state"
+  validate_backend_topology
+  log "backend topology verified"
 }
 
 restore_include_or_die() {
@@ -762,8 +822,11 @@ self_test() {
       case "$*" in
         "container exists $NGINX"|"container exists $SLOT_A") return 0 ;;
         "container exists $SLOT_B") return 1 ;;
+        "inspect $SLOT_A --format {{.State.Running}}") printf '%s\n' true; return 0 ;;
         "inspect $SLOT_A --format {{.Image}}") printf '%s\n' "$old_image"; return 0 ;;
         *"HostConfig.PortBindings"*) return 0 ;;
+        "inspect $SLOT_A --format {{.HostConfig.Memory}}") memory_limit_bytes; return 0 ;;
+        "inspect $SLOT_A --format {{.HostConfig.RestartPolicy.Name}}") printf '%s\n' always; return 0 ;;
         "inspect $SLOT_A --format {{.HostConfig.Memory}}") memory_limit_bytes; return 0 ;;
         "inspect $NGINX --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK"; return 0 ;;
       "inspect $SLOT_A --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK $PRIVATE_NETWORK"; return 0 ;;
@@ -880,6 +943,7 @@ self_test() {
       case "$*" in
         "container exists $NGINX"|"container exists $SLOT_A") return 0 ;;
         "container exists $SLOT_B") return 1 ;;
+        "inspect $SLOT_A --format {{.State.Running}}") printf '%s\n' true; return 0 ;;
         "inspect $SLOT_A --format {{.Image}}") printf '%s\n' "$old_image"; return 0 ;;
         "inspect $SLOT_B --format {{.Image}}") printf '%s\n' "$good_image"; return 0 ;;
         *"HostConfig.PortBindings"*) return 0 ;;
@@ -941,6 +1005,7 @@ self_test() {
       case "$*" in
         "container exists $NGINX"|"container exists $SLOT_A") return 0 ;;
         "container exists $SLOT_B") return 1 ;;
+        "inspect $SLOT_A --format {{.State.Running}}") printf '%s\n' true; return 0 ;;
         "inspect $SLOT_A --format {{.Image}}") printf '%s\n' "$old_image"; return 0 ;;
         *"HostConfig.PortBindings"*) return 0 ;;
         "inspect $SLOT_A --format {{.HostConfig.Memory}}") memory_limit_bytes; return 0 ;;
@@ -971,6 +1036,77 @@ self_test() {
   assert_not_grep "exec $NGINX nginx -s reload" "$log_file"
   assert_no_glob_matches "$state_dir/.readle-backend-upstream.conf.backup.*"
 
+  log_file="$(mktemp)"
+  if (
+    podman_cmd() {
+      printf '%s\n' "$*" >> "$log_file"
+      case "$*" in
+        "container exists $NGINX"|"container exists $SLOT_A") return 0 ;;
+        "container exists $SLOT_B") return 1 ;;
+        "inspect $SLOT_A --format {{.State.Running}}") printf '%s\n' true; return 0 ;;
+        "inspect $SLOT_A --format {{.Image}}") printf '%s\n' "$old_image"; return 0 ;;
+        *"HostConfig.PortBindings"*) return 0 ;;
+        "inspect $SLOT_A --format {{.HostConfig.Memory}}") memory_limit_bytes; return 0 ;;
+        "inspect $SLOT_A --format {{.HostConfig.RestartPolicy.Name}}") printf '%s\n' always; return 0 ;;
+        "inspect $NGINX --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK"; return 0 ;;
+        "inspect $SLOT_A --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK $PRIVATE_NETWORK"; return 0 ;;
+        "exec $NGINX sh -c grep -R -F 'include $NGINX_UPSTREAM_INCLUDE;' /etc/nginx >/dev/null 2>&1") return 0 ;;
+        "exec $NGINX sh -c test -f $NGINX_UPSTREAM_INCLUDE && cat $NGINX_UPSTREAM_INCLUDE") nginx_include_line "$SLOT_A"; return 0 ;;
+        *) printf 'unexpected podman command: %s\n' "$*" >&2; return 1 ;;
+      esac
+    }
+    container_deploy_ref() { printf '%s\n' "$good_ref"; }
+    container_revision() { printf '%s\n' "$good_sha"; }
+    flock() { return 0; }
+    verify_backend_topology
+  ) 2>/dev/null; then
+    :
+  else
+    die "self-test rejected a valid backend topology"
+  fi
+  assert_not_grep '^pull \|^run \|^stop \|rm -f\|nginx -s reload\|save_state' "$log_file"
+
+  log_file="$(mktemp)"
+  if (
+    podman_cmd() {
+      printf '%s\n' "$*" >> "$log_file"
+      case "$*" in
+        "container exists $NGINX"|"container exists $SLOT_A") return 0 ;;
+        "container exists $SLOT_B") return 1 ;;
+        "inspect $SLOT_A --format {{.State.Running}}") printf '%s\n' true; return 0 ;;
+        "inspect $SLOT_A --format {{.Image}}") printf '%s\n' "$old_image"; return 0 ;;
+        *"HostConfig.PortBindings"*) return 0 ;;
+        "inspect $SLOT_A --format {{.HostConfig.Memory}}") memory_limit_bytes; return 0 ;;
+        "inspect $SLOT_A --format {{.HostConfig.RestartPolicy.Name}}") printf '%s\n' always; return 0 ;;
+        "inspect $NGINX --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK"; return 0 ;;
+        "inspect $SLOT_A --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK $PRIVATE_NETWORK"; return 0 ;;
+        "exec $NGINX sh -c grep -R -F 'include $NGINX_UPSTREAM_INCLUDE;' /etc/nginx >/dev/null 2>&1") return 0 ;;
+        "exec $NGINX sh -c test -f $NGINX_UPSTREAM_INCLUDE && cat $NGINX_UPSTREAM_INCLUDE") nginx_include_line "$SLOT_B"; return 0 ;;
+        *) printf 'unexpected podman command: %s\n' "$*" >&2; return 1 ;;
+      esac
+    }
+    container_deploy_ref() { printf '%s\n' "$good_ref"; }
+    container_revision() { printf '%s\n' "$good_sha"; }
+    flock() { return 0; }
+    verify_backend_topology
+  ) 2>/dev/null; then
+    die "self-test accepted a backend topology mismatch"
+  fi
+  assert_not_grep '^pull \|^run \|^stop \|rm -f\|nginx -s reload\|save_state' "$log_file"
+
+  log_file="$(mktemp)"
+  if (
+    podman_cmd() {
+      printf '%s\n' "$*" >> "$log_file"
+      return 1
+    }
+    flock() { return 1; }
+    verify_backend_topology
+  ) 2>/dev/null; then
+    die "self-test accepted a backend verify lock timeout"
+  fi
+  assert_not_grep '^pull \|^run \|^stop \|rm -f\|nginx -s reload\|save_state' "$log_file"
+
   rm -rf "$state_dir"
   IMAGE_REPOSITORY_FILE="$original_repository_file"
   STATE_FILE="$original_state"
@@ -986,6 +1122,7 @@ self_test() {
 
 main() {
   [[ "${1:-}" != "--self-test" ]] || { self_test; return; }
+  [[ "${1:-}" != "--verify-backend-topology" ]] || { [[ "$#" == 1 ]] || die "usage: $0 --verify-backend-topology"; verify_backend_topology; return; }
   [[ "$#" == 2 ]] || die "usage: $0 <image@sha256:digest> <40-char-git-sha>"
   deploy "$1" "$2"
 }

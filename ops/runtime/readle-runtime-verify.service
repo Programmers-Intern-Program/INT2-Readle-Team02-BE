@@ -1,0 +1,12 @@
+[Unit]
+Description=Readle rootful Podman runtime verifier
+Wants=network-online.target podman-restart.service readle-podman-forward.service
+After=network-online.target podman-restart.service readle-podman-forward.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/readle-runtime-verify
+TimeoutStartSec=90s
+
+[Install]
+WantedBy=multi-user.target
