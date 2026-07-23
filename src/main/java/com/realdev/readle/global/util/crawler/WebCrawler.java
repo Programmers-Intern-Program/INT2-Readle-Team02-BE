@@ -38,7 +38,7 @@ public class WebCrawler {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   private static final int TIMEOUT_MS = 3000;
   private static final int MAX_BODY_SIZE = 5 * 1024 * 1024; // 5MB
-  private static final int MAX_REDIRECTS = 3;
+  private static final int MAX_REDIRECTS = 10;
 
   static {
     // HttpURLConnection에서 Host 헤더를 임의로 조작할 수 있도록 허용 (IP Pinning 시 가상 호스팅 라우팅 문제 해결)
@@ -49,6 +49,7 @@ public class WebCrawler {
     log.info("[CRAWL_START] URL: {}", url);
     String currentUrl = url;
     int redirectCount = 0;
+    String cookieHeader = null; // 리다이렉트 시 쿠키 유지를 위한 변수
 
     try {
       while (true) {
@@ -72,7 +73,7 @@ public class WebCrawler {
 
         try {
           // IP 주소 기반 직접 연결 요청 (2차 DNS 룩업 차단을 통한 Rebinding 방어)
-          Document doc = fetchHtml(currentUrl, host, safeAddress);
+          Document doc = fetchHtml(currentUrl, host, safeAddress, cookieHeader);
           CrawledDocument result = parse(doc);
           log.info("[CRAWL_SUCCESS] URL: {}", url);
           return result;
@@ -82,7 +83,32 @@ public class WebCrawler {
             throw new CustomException(ContentErrorCode.EXTRACT_FAILED, "리다이렉트 횟수가 초과되었습니다.");
           }
           currentUrl = getSafeRedirectLocation(e, currentUrl);
-          log.info("[CRAWL_REDIRECT] Target URL: {}", currentUrl);
+
+          // 리다이렉트 시 Set-Cookie 헤더를 수집하여 다음 요청에 전달
+          if (e.getCookies() != null && !e.getCookies().isEmpty()) {
+            // 여러 개의 Set-Cookie를 하나의 Cookie 문자열로 조합
+            StringBuilder cookieBuilder = new StringBuilder();
+            if (cookieHeader != null) {
+              cookieBuilder.append(cookieHeader).append("; ");
+            }
+            for (int i = 0; i < e.getCookies().size(); i++) {
+              String cookie = e.getCookies().get(i);
+              // "key=value; Path=/; HttpOnly" 에서 앞부분 key=value만 추출
+              int semicolonIdx = cookie.indexOf(';');
+              if (semicolonIdx != -1) {
+                cookieBuilder.append(cookie.substring(0, semicolonIdx));
+              } else {
+                cookieBuilder.append(cookie);
+              }
+              if (i < e.getCookies().size() - 1) {
+                cookieBuilder.append("; ");
+              }
+            }
+            cookieHeader = cookieBuilder.toString();
+          }
+
+          log.info(
+              "[CRAWL_REDIRECT] Target URL: {}, Cookies: {}", currentUrl, cookieHeader != null);
 
         } catch (IllegalArgumentException | MalformedURLException e) {
           throw new CustomException(ContentErrorCode.INVALID_URL, e);
@@ -127,9 +153,14 @@ public class WebCrawler {
   }
 
   // IP Pinning(DNS Rebinding 방어) 및 수동 리다이렉트 추적이 적용된 저수준 HTTP 통신 처리
-  private Document fetchHtml(String currentUrl, String host, InetAddress safeAddress)
+  private Document fetchHtml(
+      String currentUrl, String host, InetAddress safeAddress, String cookieHeader)
       throws IOException {
     HttpURLConnection conn = getHttpURLConnection(currentUrl, host, safeAddress);
+
+    if (cookieHeader != null && !cookieHeader.isEmpty()) {
+      conn.setRequestProperty("Cookie", cookieHeader);
+    }
 
     // HTTPS인 경우 SNI 및 HostnameVerifier 수동 설정을 통한 IP 통신 지원
     if (conn instanceof HttpsURLConnection httpsConn) {
@@ -181,8 +212,9 @@ public class WebCrawler {
     // 리다이렉트 발생 시 외부 루프로 위임하기 위한 커스텀 예외 발생
     if (statusCode >= 300 && statusCode < 400) {
       String location = conn.getHeaderField("Location");
+      List<String> cookies = conn.getHeaderFields().get("Set-Cookie");
       conn.disconnect();
-      throw new RedirectException(location, statusCode);
+      throw new RedirectException(location, statusCode, cookies);
     }
 
     if (statusCode == 200) {
@@ -224,6 +256,20 @@ public class WebCrawler {
   @NonNull HttpURLConnection getHttpURLConnection(
       String currentUrl, String host, InetAddress safeAddress) throws IOException {
     URL parsedUrl = new URL(currentUrl);
+    HttpURLConnection conn = getHttpURLConnection(safeAddress, parsedUrl);
+    conn.setRequestProperty("User-Agent", USER_AGENT);
+    int port = parsedUrl.getPort();
+    String hostHeader =
+        (port != -1 && port != parsedUrl.getDefaultPort()) ? host + ":" + port : host;
+    conn.setRequestProperty("Host", hostHeader); // HTTP 가상 호스트 라우팅 보존
+    conn.setRequestProperty(
+        "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp, */*;q=0.8");
+    conn.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7");
+    return conn;
+  }
+
+  private static @NonNull HttpURLConnection getHttpURLConnection(
+      InetAddress safeAddress, URL parsedUrl) throws IOException {
     String ipString = safeAddress.getHostAddress();
     String ipHost = (safeAddress instanceof Inet6Address) ? "[" + ipString + "]" : ipString;
 
@@ -234,14 +280,6 @@ public class WebCrawler {
     conn.setConnectTimeout(TIMEOUT_MS);
     conn.setReadTimeout(TIMEOUT_MS);
     conn.setInstanceFollowRedirects(false); // 리다이렉트 경로 SSRF 재검증을 위해 자동 이동 금지
-    conn.setRequestProperty("User-Agent", USER_AGENT);
-    int port = parsedUrl.getPort();
-    String hostHeader =
-        (port != -1 && port != parsedUrl.getDefaultPort()) ? host + ":" + port : host;
-    conn.setRequestProperty("Host", hostHeader); // HTTP 가상 호스트 라우팅 보존
-    conn.setRequestProperty(
-        "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp, */*;q=0.8");
-    conn.setRequestProperty("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7");
     return conn;
   }
 
@@ -345,10 +383,78 @@ public class WebCrawler {
   }
 
   private String extractCleanBody(Document doc) {
-    // 불필요한 메타/인풋/노이즈 엘리먼트 제거
+    // 불필요한 메타/인풋/노이즈 엘리먼트 기본 태그 기반 제거
     doc.select(
             "script, style, header, footer, nav, form, noscript, iframe, button, input, textarea, aside, dialog, svg")
         .remove();
+
+    // 블로그/게시판 공통 노이즈(댓글, 사이드바, 프로필, 관련글 등) CSS 클래스/ID 기반 휴리스틱 제거
+    String noiseSelectors =
+        String.join(
+            ", ",
+            "[class*='comment']",
+            "[id*='comment']", // 댓글 영역
+            "[class*='reply']",
+            "[id*='reply']", // 답글 영역
+            "[class*='sidebar']",
+            "[id*='sidebar']", // 사이드바
+            "[class*='menu']",
+            "[id*='menu']", // 메뉴
+            "[class*='widget']",
+            "[id*='widget']", // 위젯
+            "[class*='related']",
+            "[id*='related']", // 관련글
+            "[class*='share']",
+            "[id*='share']", // 공유 버튼
+            "[class*='author']",
+            "[id*='author']", // 작성자 정보
+            "[class*='profile']",
+            "[id*='profile']", // 프로필
+            "[class*='member']",
+            "[id*='member']", // 작성자/멤버 정보 (올리브영 등)
+            "[class*='tags']",
+            "[id*='tags']", // 태그 영역
+            "[class*='pagination']",
+            "[id*='pagination']", // 페이징
+            ".another_category", // 티스토리 특화: 관련글 플러그인
+            ".screen_out",
+            ".blind",
+            ".sr-only" // 스크린 리더용 숨김 텍스트 (메뉴 레이어, 검색 레이어 등)
+            );
+    doc.select(noiseSelectors).remove();
+
+    // 3차: 특정 블로그 플랫폼 특화 텍스트/구조 기반 노이즈 제거 (Velog 등)
+    // - "다음 포스트", "이전 포스트" 링크 블록 째로 제거
+    doc.select("a:has(*:containsOwn(다음 포스트)), a:has(*:containsOwn(이전 포스트))").remove();
+    // - "N개의 댓글" 텍스트를 포함하는 요소 제거
+    doc.select("*:matches(^\\s*[0-9]+개의 댓글\\s*$)").remove();
+    // - Velog 프로필 영역 (name과 description을 직계 자식으로 갖는 div)
+    doc.select("div:has(> div.name):has(> div.description)").remove();
+
+    // 4차: 나무위키(Namuwiki) 등 위키류 사이트 특화 텍스트 기반 노이즈 제거
+    // - 하단 다국어 푸터 및 저작권 정보
+    doc.select(
+            "*:containsOwn(Operado por umanle S.R.L.), *:containsOwn(Hecho con ❤️), *:containsOwn(Impulsado por the seed engine)")
+        .remove();
+    doc.select("*:containsOwn(This site is protected by reCAPTCHA)").remove();
+    doc.select("*:containsOwn(Contáctenos), *:containsOwn(Términos de uso)").remove();
+    // - 네비게이션 및 편집 모달 관련 텍스트
+    doc.select("*:containsOwn(최근 변경), *:containsOwn(최근 토론), *:containsOwn(특수 기능)").remove();
+    doc.select("*:matches(^\\s*최근 수정 시각:\\s*\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\s*$)")
+        .remove();
+    doc.select("*:containsOwn(편집 권한이 부족합니다.), *:containsOwn(편집 권한이 부족한 경우 아래의)").remove();
+    doc.select("a:containsOwn(편집 요청), button:containsOwn(편집 요청)").remove();
+
+    // 5차: 브런치(Brunch) 등 플랫폼 특화 "이전글/다음글" 링크 블록 제거
+    doc.select("a:has(*:containsOwn(작가의 이전글)), a:has(*:containsOwn(작가의 다음글))").remove();
+    doc.select("a:has(*:containsOwn(매거진의 이전글)), a:has(*:containsOwn(매거진의 다음글))").remove();
+    doc.select("a:has(*:matches(^\\s*이전 [0-9]+화\\s*$)), a:has(*:matches(^\\s*다음 [0-9]+화\\s*$))")
+        .remove();
+    // (만약 a 태그가 아닌 다른 래퍼에 있을 경우를 대비한 텍스트 핀셋 제거)
+    doc.select(
+            "*:containsOwn(작가의 이전글), *:containsOwn(작가의 다음글), *:containsOwn(매거진의 이전글), *:containsOwn(매거진의 다음글)")
+        .remove();
+    doc.select("*:matches(^\\s*이전 [0-9]+화\\s*$), *:matches(^\\s*다음 [0-9]+화\\s*$)").remove();
 
     // 아티클 본문 검색 우선순위 설정
     Element bodyElement = doc.selectFirst("article");
@@ -441,10 +547,12 @@ public class WebCrawler {
   private static class RedirectException extends IOException {
     private final String location;
     private final int statusCode;
+    private final List<String> cookies;
 
-    public RedirectException(String location, int statusCode) {
+    public RedirectException(String location, int statusCode, List<String> cookies) {
       this.location = location;
       this.statusCode = statusCode;
+      this.cookies = cookies;
     }
   }
 
