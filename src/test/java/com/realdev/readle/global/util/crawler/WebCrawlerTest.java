@@ -509,7 +509,7 @@ class WebCrawlerTest {
           private int callCount = 0;
 
           @Override
-          HttpURLConnection getHttpURLConnection(
+          @NonNull HttpURLConnection getHttpURLConnection(
               String currentUrl, String host, InetAddress safeAddress) {
             requestedUrls.add(currentUrl);
             callCount++;
@@ -567,9 +567,10 @@ class WebCrawlerTest {
 
     Method fetchHtmlMethod =
         WebCrawler.class.getDeclaredMethod(
-            "fetchHtml", String.class, String.class, InetAddress.class);
+            "fetchHtml", String.class, String.class, InetAddress.class, String.class);
     fetchHtmlMethod.setAccessible(true);
-    fetchHtmlMethod.invoke(testCrawler, "https://[::1]/", "[::1]", InetAddress.getByName("::1"));
+    fetchHtmlMethod.invoke(
+        testCrawler, "https://[::1]/", "[::1]", InetAddress.getByName("::1"), null);
 
     HostnameVerifier verifier = verifierRef.get();
     assertThat(verifier).isNotNull();
@@ -590,7 +591,11 @@ class WebCrawlerTest {
 
     // 3. 도메인 호스트인데 iPAddress(Type 7) SAN이 있는 경우 차단 (도메인은 Type 2만 허용해야 함)
     fetchHtmlMethod.invoke(
-        testCrawler, "https://example.com/", "example.com", InetAddress.getByName("127.0.0.1"));
+        testCrawler,
+        "https://example.com/",
+        "example.com",
+        InetAddress.getByName("127.0.0.1"),
+        null);
     HostnameVerifier domainVerifier = verifierRef.get();
 
     SSLSession session3 = mock(SSLSession.class);

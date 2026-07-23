@@ -14,8 +14,11 @@ import java.net.URL;
 import java.net.UnknownHostException;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLParameters;
@@ -49,6 +52,7 @@ public class WebCrawler {
     log.info("[CRAWL_START] URL: {}", url);
     String currentUrl = url;
     int redirectCount = 0;
+    Map<String, String> cookieMap = new LinkedHashMap<>();
     String cookieHeader = null; // 리다이렉트 시 쿠키 유지를 위한 변수
 
     try {
@@ -86,25 +90,29 @@ public class WebCrawler {
 
           // 리다이렉트 시 Set-Cookie 헤더를 수집하여 다음 요청에 전달
           if (e.getCookies() != null && !e.getCookies().isEmpty()) {
-            // 여러 개의 Set-Cookie를 하나의 Cookie 문자열로 조합
-            StringBuilder cookieBuilder = new StringBuilder();
-            if (cookieHeader != null) {
-              cookieBuilder.append(cookieHeader).append("; ");
-            }
-            for (int i = 0; i < e.getCookies().size(); i++) {
-              String cookie = e.getCookies().get(i);
-              // "key=value; Path=/; HttpOnly" 에서 앞부분 key=value만 추출
+            for (String cookie : e.getCookies()) {
               int semicolonIdx = cookie.indexOf(';');
-              if (semicolonIdx != -1) {
-                cookieBuilder.append(cookie.substring(0, semicolonIdx));
+              String keyValue = (semicolonIdx != -1) ? cookie.substring(0, semicolonIdx) : cookie;
+              int equalsIdx = keyValue.indexOf('=');
+              if (equalsIdx != -1) {
+                String key = keyValue.substring(0, equalsIdx).trim();
+                String value = keyValue.substring(equalsIdx + 1).trim();
+                cookieMap.put(key, value);
               } else {
-                cookieBuilder.append(cookie);
-              }
-              if (i < e.getCookies().size() - 1) {
-                cookieBuilder.append("; ");
+                cookieMap.put(keyValue.trim(), "");
               }
             }
-            cookieHeader = cookieBuilder.toString();
+            if (!cookieMap.isEmpty()) {
+              StringBuilder cookieBuilder = new StringBuilder();
+              for (Map.Entry<String, String> entry : cookieMap.entrySet()) {
+                if (cookieBuilder.length() > 0) cookieBuilder.append("; ");
+                cookieBuilder.append(entry.getKey());
+                if (!entry.getValue().isEmpty()) {
+                  cookieBuilder.append("=").append(entry.getValue());
+                }
+              }
+              cookieHeader = cookieBuilder.toString();
+            }
           }
 
           log.info(
@@ -212,7 +220,12 @@ public class WebCrawler {
     // 리다이렉트 발생 시 외부 루프로 위임하기 위한 커스텀 예외 발생
     if (statusCode >= 300 && statusCode < 400) {
       String location = conn.getHeaderField("Location");
-      List<String> cookies = conn.getHeaderFields().get("Set-Cookie");
+      List<String> cookies = new ArrayList<>();
+      for (Map.Entry<String, List<String>> entry : conn.getHeaderFields().entrySet()) {
+        if (entry.getKey() != null && "set-cookie".equalsIgnoreCase(entry.getKey())) {
+          cookies.addAll(entry.getValue());
+        }
+      }
       conn.disconnect();
       throw new RedirectException(location, statusCode, cookies);
     }
