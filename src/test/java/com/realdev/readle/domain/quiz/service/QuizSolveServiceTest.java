@@ -284,6 +284,22 @@ class QuizSolveServiceTest {
     assertThat(response.getTotalCount()).isEqualTo(2);
     // 선택지(1번)는 정답(1), 주관식 101자(2번)는 즉시 오답(0) -> 총 정답 1개
     assertThat(response.getCorrectCount()).isEqualTo(1);
+
+    @SuppressWarnings("unchecked")
+    org.mockito.ArgumentCaptor<List<QuizAnswer>> answersCaptor =
+        org.mockito.ArgumentCaptor.forClass(List.class);
+    verify(quizAnswerRepository, times(2)).saveAll(answersCaptor.capture());
+
+    List<QuizAnswer> staticAnswers = answersCaptor.getAllValues().get(0);
+    QuizAnswer answer101 =
+        staticAnswers.stream()
+            .filter(ans -> ans.getQuizQuestion().getId().equals(11L))
+            .findFirst()
+            .orElseThrow();
+
+    assertThat(answer101.getIsCorrect()).isFalse();
+    assertThat(answer101.getAiFeedback()).isEqualTo("답안 길이가 100자를 초과하여 오답 처리되었습니다.");
+
     // AI 호출 0회 검증
     verify(quizAiGradingService, times(0)).gradeAnswerAsync(any(), any(), any());
   }
@@ -356,9 +372,10 @@ class QuizSolveServiceTest {
   }
 
   @Test
-  @DisplayName("AI 채점 실패 시 All-or-Nothing 롤백 및 풀이 상태가 IN_PROGRESS로 원복되고 502 에러를 던진다")
+  @DisplayName("AI 채점 실패 시 All-or-Nothing 롤백 및 실제 풀이 상태가 IN_PROGRESS로 원복되고 502 에러를 던진다")
   void submitAnswers_AiGradingFailed_Rollback() {
-    given(quizAttemptRepository.findByIdForUpdate(200L)).willReturn(Optional.of(quizAttempt));
+    QuizAttempt realAttempt = QuizAttempt.createInProgress(quizSet, member);
+    given(quizAttemptRepository.findByIdForUpdate(200L)).willReturn(Optional.of(realAttempt));
     given(quizQuestionRepository.findByQuizSetOrderByOrderNoAsc(quizSet))
         .willReturn(List.of(question1, question2));
     given(quizChoiceRepository.findById(50L)).willReturn(Optional.of(choice1));
@@ -386,8 +403,8 @@ class QuizSolveServiceTest {
         .extracting("errorCode")
         .isEqualTo(QuizErrorCode.QUIZ_GRADING_FAILED);
 
-    // attempt 상태가 IN_PROGRESS로 원복(resetToInProgress) 되었는지 검증
-    verify(quizAttempt).resetToInProgress();
+    // 실제 엔티티 상태가 IN_PROGRESS로 원복 되었는지 검증
+    assertThat(realAttempt.getStatus()).isEqualTo(AttemptStatus.IN_PROGRESS);
     // AI 채점 실패 시 saveAll 및 save가 결코 호출되지 않고 All-or-Nothing 롤백되었음을 검증
     verify(quizAnswerRepository, times(0)).saveAll(any());
     verify(quizResultRepository, times(0)).save(any());
