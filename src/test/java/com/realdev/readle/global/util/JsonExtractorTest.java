@@ -89,6 +89,14 @@ class JsonExtractorTest {
     assertThat(result).isEqualTo("{\n  \"tags\": [\"Spring\"]");
   }
 
+  @Test
+  @DisplayName("문두가 [ 로 시작하는 미완성 최상위 배열의 경우 내부 객체 우발 추출 없이 원문을 유지한다")
+  void extractJson_unterminatedTopLevelArray() {
+    String input = "[{\"id\": 1}, {\"id\": 2}";
+    String result = JsonExtractor.extractJson(input);
+    assertThat(result).isEqualTo("[{\"id\": 1}, {\"id\": 2}");
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"", "   "})
   @DisplayName("null 이거나 빈 문자열인 경우 빈 문자열을 반환한다")

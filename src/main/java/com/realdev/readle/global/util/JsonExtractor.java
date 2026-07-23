@@ -49,9 +49,10 @@ public class JsonExtractor {
   }
 
   private static String findBalancedCandidate(String s) {
-    // 루트가 '{' 로 시작하지만 닫히지 않은 유실된 미완성 JSON 객체인 경우
+    // 루트가 '{' 또는 '[' 로 시작하지만 닫히지 않은 유실된 미완성 최상위 JSON 구조인 경우
     // 내부 하위 배열/객체 우발 파싱을 막기 위해 렌더링 중단
-    if (s.startsWith("{") && isUnclosedRootBrace(s)) {
+    if ((s.startsWith("{") && isUnclosedRootBracket(s, '{', '}'))
+        || (s.startsWith("[") && isUnclosedRootBracket(s, '[', ']'))) {
       return "";
     }
 
@@ -106,7 +107,7 @@ public class JsonExtractor {
     return "";
   }
 
-  private static boolean isUnclosedRootBrace(String s) {
+  private static boolean isUnclosedRootBracket(String s, char openChar, char closeChar) {
     int depth = 0;
     boolean inString = false;
     boolean escaped = false;
@@ -126,9 +127,9 @@ public class JsonExtractor {
         continue;
       }
       if (!inString) {
-        if (c == '{') {
+        if (c == openChar) {
           depth++;
-        } else if (c == '}') {
+        } else if (c == closeChar) {
           depth--;
           if (depth == 0) {
             return false;
