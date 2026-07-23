@@ -1,6 +1,7 @@
 package com.realdev.readle.domain.quiz.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
@@ -113,9 +114,12 @@ class QuizAiGradingServiceTest {
     // when & then
     CompletableFuture<QuizAiGradingService.AiEvaluationResult> future =
         quizAiGradingService.gradeAnswerAsync(question, "오답", "본문 텍스트");
-    org.assertj.core.api.Assertions.assertThatThrownBy(future::join)
+    assertThatThrownBy(future::join)
         .isInstanceOf(java.util.concurrent.CompletionException.class)
-        .hasCauseInstanceOf(com.realdev.readle.global.exception.CustomException.class);
+        .hasCauseInstanceOf(com.realdev.readle.global.exception.CustomException.class)
+        .extracting(Throwable::getCause)
+        .extracting("errorCode")
+        .isEqualTo(com.realdev.readle.domain.quiz.exception.QuizErrorCode.QUIZ_GRADING_FAILED);
     verify(claudeClient, times(2)).getGradingGeneratedText(any(), any()); // 최초 + 1회 재시도 = 2번 호출
   }
 
@@ -130,9 +134,12 @@ class QuizAiGradingServiceTest {
 
     CompletableFuture<QuizAiGradingService.AiEvaluationResult> future =
         quizAiGradingService.gradeAnswerAsync(question, "오답", "본문 텍스트");
-    org.assertj.core.api.Assertions.assertThatThrownBy(future::join)
+    assertThatThrownBy(future::join)
         .isInstanceOf(java.util.concurrent.CompletionException.class)
-        .hasCauseInstanceOf(com.realdev.readle.global.exception.CustomException.class);
+        .hasCauseInstanceOf(com.realdev.readle.global.exception.CustomException.class)
+        .extracting(Throwable::getCause)
+        .extracting("errorCode")
+        .isEqualTo(com.realdev.readle.domain.quiz.exception.QuizErrorCode.QUIZ_GRADING_FAILED);
     verify(claudeClient, times(2)).getGradingGeneratedText(any(), any());
   }
 
@@ -150,9 +157,12 @@ class QuizAiGradingServiceTest {
 
     CompletableFuture<QuizAiGradingService.AiEvaluationResult> future =
         quizAiGradingService.gradeAnswerAsync(question, "지연 응답", "본문 텍스트");
-    org.assertj.core.api.Assertions.assertThatThrownBy(future::join)
+    assertThatThrownBy(future::join)
         .isInstanceOf(java.util.concurrent.CompletionException.class)
-        .hasCauseInstanceOf(com.realdev.readle.global.exception.CustomException.class);
+        .hasCauseInstanceOf(com.realdev.readle.global.exception.CustomException.class)
+        .extracting(Throwable::getCause)
+        .extracting("errorCode")
+        .isEqualTo(com.realdev.readle.domain.quiz.exception.QuizErrorCode.QUIZ_GRADING_FAILED);
 
     // 첫 호출에서 타임아웃나면 재시도 1번 더 하므로 2번 호출됨 (재시도도 타임아웃 남)
     verify(claudeClient, times(2)).getGradingGeneratedText(any(), any());

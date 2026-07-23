@@ -359,7 +359,6 @@ class QuizSolveServiceTest {
   @DisplayName("AI 채점 실패 시 All-or-Nothing 롤백 및 풀이 상태가 IN_PROGRESS로 원복되고 502 에러를 던진다")
   void submitAnswers_AiGradingFailed_Rollback() {
     given(quizAttemptRepository.findByIdForUpdate(200L)).willReturn(Optional.of(quizAttempt));
-    given(quizAttemptRepository.findById(200L)).willReturn(Optional.of(quizAttempt));
     given(quizQuestionRepository.findByQuizSetOrderByOrderNoAsc(quizSet))
         .willReturn(List.of(question1, question2));
     given(quizChoiceRepository.findById(50L)).willReturn(Optional.of(choice1));
@@ -389,6 +388,9 @@ class QuizSolveServiceTest {
 
     // attempt 상태가 IN_PROGRESS로 원복(resetToInProgress) 되었는지 검증
     verify(quizAttempt).resetToInProgress();
+    // AI 채점 실패 시 saveAll 및 save가 결코 호출되지 않고 All-or-Nothing 롤백되었음을 검증
+    verify(quizAnswerRepository, times(0)).saveAll(any());
+    verify(quizResultRepository, times(0)).save(any());
   }
 
   @Test
