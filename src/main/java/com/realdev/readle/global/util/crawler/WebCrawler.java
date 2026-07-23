@@ -256,7 +256,7 @@ public class WebCrawler {
   @NonNull HttpURLConnection getHttpURLConnection(
       String currentUrl, String host, InetAddress safeAddress) throws IOException {
     URL parsedUrl = new URL(currentUrl);
-    HttpURLConnection conn = getHttpURLConnection(safeAddress, parsedUrl);
+    HttpURLConnection conn = createIpPinnedConnection(safeAddress, parsedUrl);
     conn.setRequestProperty("User-Agent", USER_AGENT);
     int port = parsedUrl.getPort();
     String hostHeader =
@@ -268,7 +268,7 @@ public class WebCrawler {
     return conn;
   }
 
-  private static @NonNull HttpURLConnection getHttpURLConnection(
+  private static @NonNull HttpURLConnection createIpPinnedConnection(
       InetAddress safeAddress, URL parsedUrl) throws IOException {
     String ipString = safeAddress.getHostAddress();
     String ipHost = (safeAddress instanceof Inet6Address) ? "[" + ipString + "]" : ipString;
