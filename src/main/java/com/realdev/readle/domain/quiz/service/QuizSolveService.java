@@ -198,7 +198,7 @@ public class QuizSolveService {
             });
 
     List<QuizAnswer> staticAnswers = new ArrayList<>();
-    List<CompletableFuture<QuizAiGradingService.AiEvaluationResult>> aiTasks = new ArrayList<>();
+    List<WrittenAiTask> aiTasks = new ArrayList<>();
 
     for (QuizQuestion question : questions) {
       QuizSubmitRequest.AnswerRequest answerReq = answerMap.get(question.getId());
@@ -212,7 +212,11 @@ public class QuizSolveService {
           staticAnswers.add(
               QuizAnswer.createForWritten(lockedAttempt, question, answerText, true, null));
         } else {
-          aiTasks.add(quizAiGradingService.gradeAnswerAsync(question, answerText, articleText));
+          aiTasks.add(
+              new WrittenAiTask(
+                  question,
+                  answerText,
+                  quizAiGradingService.gradeAnswerAsync(question, answerText, articleText)));
         }
       }
     }
@@ -220,14 +224,16 @@ public class QuizSolveService {
     // 2. Non-Transactional: 비동기 채점 대기
     List<QuizAnswer> aiAnswers = new ArrayList<>();
     if (!aiTasks.isEmpty()) {
-      CompletableFuture.allOf(aiTasks.toArray(new CompletableFuture[0])).join();
-      for (CompletableFuture<QuizAiGradingService.AiEvaluationResult> taskFuture : aiTasks) {
-        QuizAiGradingService.AiEvaluationResult aiResult = taskFuture.join();
+      CompletableFuture.allOf(
+              aiTasks.stream().map(WrittenAiTask::future).toArray(CompletableFuture[]::new))
+          .join();
+      for (WrittenAiTask task : aiTasks) {
+        QuizAiGradingService.AiEvaluationResult aiResult = task.future().join();
         aiAnswers.add(
             QuizAnswer.createForWritten(
                 lockedAttempt,
-                aiResult.question(),
-                aiResult.submittedAnswer(),
+                task.question(),
+                task.sanitizedAnswer(),
                 aiResult.isCorrect(),
                 aiResult.aiFeedback()));
       }
@@ -345,4 +351,9 @@ public class QuizSolveService {
     }
     return input.replace("<", "&lt;").replace(">", "&gt;");
   }
+
+  private record WrittenAiTask(
+      QuizQuestion question,
+      String sanitizedAnswer,
+      CompletableFuture<QuizAiGradingService.AiEvaluationResult> future) {}
 }

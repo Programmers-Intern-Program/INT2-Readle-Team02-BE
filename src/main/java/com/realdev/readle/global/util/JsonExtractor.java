@@ -49,6 +49,12 @@ public class JsonExtractor {
   }
 
   private static String findBalancedCandidate(String s) {
+    // 루트가 '{' 로 시작하지만 닫히지 않은 유실된 미완성 JSON 객체인 경우
+    // 내부 하위 배열/객체 우발 파싱을 막기 위해 렌더링 중단
+    if (s.startsWith("{") && isUnclosedRootBrace(s)) {
+      return "";
+    }
+
     int length = s.length();
 
     for (int start = 0; start < length; start++) {
@@ -95,15 +101,42 @@ public class JsonExtractor {
           }
         }
       }
-
-      // 만약 start 지점에서 연 괄호가 끝까지 닫히지 않고 유실된 경우(depth > 0)
-      // 이는 텍스트 전체가 깨진 미완성 JSON이므로 내부 요소 우발 파싱을 막기 위해 스캔 중단
-      if (depth > 0) {
-        break;
-      }
     }
 
     return "";
+  }
+
+  private static boolean isUnclosedRootBrace(String s) {
+    int depth = 0;
+    boolean inString = false;
+    boolean escaped = false;
+
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (c == '\\' && inString) {
+        escaped = true;
+        continue;
+      }
+      if (c == '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (c == '{') {
+          depth++;
+        } else if (c == '}') {
+          depth--;
+          if (depth == 0) {
+            return false;
+          }
+        }
+      }
+    }
+    return depth > 0;
   }
 
   private static boolean isValidJson(String str) {

@@ -58,6 +58,14 @@ class JsonExtractorTest {
   }
 
   @Test
+  @DisplayName("미완성된 선행 대괄호 [ 가 문두에 포함되어 있어도 이후의 유효한 JSON 객체를 정상 추출한다")
+  void extractJson_unterminatedLeadingBracketWithValidJson() {
+    String input = "참고 [미완성: {\"tags\":[\"Java\"]}";
+    String result = JsonExtractor.extractJson(input);
+    assertThat(result).isEqualTo("{\"tags\":[\"Java\"]}");
+  }
+
+  @Test
   @DisplayName("JSON 뒤에 불필요한 닫는 괄호 ] 가 덧붙어도 유효한 JSON 객체만 추출한다")
   void extractJson_trailingBracketAfterJson() {
     String input = "{\"id\": 1}]";
