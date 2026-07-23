@@ -162,15 +162,15 @@ public class QuizSolveService {
         }
         choiceMap.put(question.getId(), choice);
       } else {
-        String answerText = answerReq.getSubmittedAnswerText();
-        if (answerText == null || answerText.trim().isEmpty()) {
+        String rawAnswerText = answerReq.getSubmittedAnswerText();
+        if (rawAnswerText == null || rawAnswerText.trim().isEmpty()) {
           throw new CustomException(QuizErrorCode.INVALID_ANSWER_FORMAT);
         }
-        // 주관식/빈칸 답안 검증 (트랜잭션 시작 전 차단)
-        if (answerText.length() > 100) {
+        // 원문(raw) 길이 및 키워드 검증 (트랜잭션 시작 전 차단)
+        if (rawAnswerText.length() > 100) {
           throw new CustomException(QuizErrorCode.INVALID_ANSWER_FORMAT);
         }
-        if (answerText.matches("(?is).*(이전 지시 무시|시스템 프롬프트|system prompt|ignore previous).*")) {
+        if (rawAnswerText.matches("(?is).*(이전 지시 무시|시스템 프롬프트|system prompt|ignore previous).*")) {
           throw new CustomException(QuizErrorCode.INVALID_ANSWER_FORMAT);
         }
       }
@@ -198,7 +198,7 @@ public class QuizSolveService {
             });
 
     List<QuizAnswer> staticAnswers = new ArrayList<>();
-    List<CompletableFuture<QuizAiGradingService.AiEvaluationResult>> aiTasks = new ArrayList<>();
+    List<WrittenAiTask> aiTasks = new ArrayList<>();
 
     for (QuizQuestion question : questions) {
       QuizSubmitRequest.AnswerRequest answerReq = answerMap.get(question.getId());
@@ -207,12 +207,16 @@ public class QuizSolveService {
         staticAnswers.add(
             QuizAnswer.createForChoice(lockedAttempt, question, choice, choice.getIsCorrect()));
       } else {
-        String answerText = answerReq.getSubmittedAnswerText();
+        String answerText = sanitizeAnswerText(answerReq.getSubmittedAnswerText());
         if (isStaticMatch(question.getCorrectAnswer(), answerText)) {
           staticAnswers.add(
               QuizAnswer.createForWritten(lockedAttempt, question, answerText, true, null));
         } else {
-          aiTasks.add(quizAiGradingService.gradeAnswerAsync(question, answerText, articleText));
+          aiTasks.add(
+              new WrittenAiTask(
+                  question,
+                  answerText,
+                  quizAiGradingService.gradeAnswerAsync(question, answerText, articleText)));
         }
       }
     }
@@ -220,14 +224,16 @@ public class QuizSolveService {
     // 2. Non-Transactional: 비동기 채점 대기
     List<QuizAnswer> aiAnswers = new ArrayList<>();
     if (!aiTasks.isEmpty()) {
-      CompletableFuture.allOf(aiTasks.toArray(new CompletableFuture[0])).join();
-      for (CompletableFuture<QuizAiGradingService.AiEvaluationResult> taskFuture : aiTasks) {
-        QuizAiGradingService.AiEvaluationResult aiResult = taskFuture.join();
+      CompletableFuture.allOf(
+              aiTasks.stream().map(WrittenAiTask::future).toArray(CompletableFuture[]::new))
+          .join();
+      for (WrittenAiTask task : aiTasks) {
+        QuizAiGradingService.AiEvaluationResult aiResult = task.future().join();
         aiAnswers.add(
             QuizAnswer.createForWritten(
                 lockedAttempt,
-                aiResult.question(),
-                aiResult.submittedAnswer(),
+                task.question(),
+                task.sanitizedAnswer(),
                 aiResult.isCorrect(),
                 aiResult.aiFeedback()));
       }
@@ -332,8 +338,22 @@ public class QuizSolveService {
     if (correct == null || submitted == null) {
       return false;
     }
-    String normalizedCorrect = correct.trim().toLowerCase().replaceAll("\\s+", " ");
-    String normalizedSubmitted = submitted.trim().toLowerCase().replaceAll("\\s+", " ");
+    String sanitizedCorrect = sanitizeAnswerText(correct);
+    String sanitizedSubmitted = sanitizeAnswerText(submitted);
+    String normalizedCorrect = sanitizedCorrect.trim().toLowerCase().replaceAll("\\s+", " ");
+    String normalizedSubmitted = sanitizedSubmitted.trim().toLowerCase().replaceAll("\\s+", " ");
     return normalizedCorrect.equals(normalizedSubmitted);
   }
+
+  private String sanitizeAnswerText(String input) {
+    if (input == null) {
+      return "";
+    }
+    return input.replace("<", "&lt;").replace(">", "&gt;");
+  }
+
+  private record WrittenAiTask(
+      QuizQuestion question,
+      String sanitizedAnswer,
+      CompletableFuture<QuizAiGradingService.AiEvaluationResult> future) {}
 }
