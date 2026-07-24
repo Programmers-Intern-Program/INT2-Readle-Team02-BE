@@ -94,6 +94,9 @@ grep -q 'MYSQLD_EXPORTER_SECRET_MODE="640"' "$ROOT/readle-monitoring" || fail "M
 grep -q 'chown "$MYSQLD_EXPORTER_SECRET_OWNER" "$path"' "$ROOT/readle-monitoring" || fail "installer must chown MySQL exporter cnf for exporter group read access"
 grep -q 'chmod "$MYSQLD_EXPORTER_SECRET_MODE" "$path"' "$ROOT/readle-monitoring" || fail "installer must chmod MySQL exporter cnf without world access"
 grep -Fxq "CREATE USER IF NOT EXISTS 'readle_exporter'@'%' IDENTIFIED BY 'replace-with-exporter-password' WITH MAX_USER_CONNECTIONS 3;" "$ROOT/sql/mysqld-exporter-grants.sql.template" || fail "MySQL exporter grant template missing MySQL 8 connection cap syntax"
+grep -Fxq "GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'readle_exporter'@'%';" "$ROOT/sql/mysqld-exporter-grants.sql.template" || fail "MySQL exporter global monitoring grants missing"
+grep -Fxq "GRANT SELECT ON performance_schema.* TO 'readle_exporter'@'%';" "$ROOT/sql/mysqld-exporter-grants.sql.template" || fail "MySQL exporter performance schema select grant missing"
+! grep -Fq "SELECT ON *.* TO 'readle_exporter'@'%';" "$ROOT/sql/mysqld-exporter-grants.sql.template" || fail "MySQL exporter must not receive global SELECT"
 grep -q 'SystemMaxUse=256M' "$ROOT/systemd/journald-readle.conf.template" || fail "journald quota template missing bounded max use"
 bash -n "$ROOT/readle-monitoring"
 "$ROOT/readle-monitoring" self-test
