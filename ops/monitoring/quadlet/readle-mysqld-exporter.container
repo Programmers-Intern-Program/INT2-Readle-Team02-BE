@@ -1,0 +1,19 @@
+[Unit]
+Description=Readle mysqld_exporter
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=quay.io/prometheus/mysqld-exporter@sha256:20b5b23a98ce3998349042a999e56d22819b46da38fa4e4e9ca0155c975c95d5
+ContainerName=readle-mysqld-exporter
+Network=readle-private
+Volume=/etc/readle/monitoring/mysqld-exporter.cnf:/run/secrets/mysqld-exporter.cnf:ro
+PodmanArgs=--memory=32m --cap-drop=all --security-opt=no-new-privileges --read-only --tmpfs=/tmp:rw,noexec,nosuid,nodev,size=8m
+Exec=--config.my-cnf=/run/secrets/mysqld-exporter.cnf --web.listen-address=:9104
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

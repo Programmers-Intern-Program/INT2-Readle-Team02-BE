@@ -1,0 +1,4 @@
+location = /api/actuator/prometheus {
+    deny all;
+    return 403;
+}

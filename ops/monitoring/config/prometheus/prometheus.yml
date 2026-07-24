@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: backend
+    metrics_path: /api/actuator/prometheus
+    basic_auth:
+      username: readle-monitor
+      password_file: /run/secrets/readle-backend-metrics-password
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/backend-active.json
+        refresh_interval: 30s
+
+  - job_name: node
+    static_configs:
+      - targets:
+          - readle-node-exporter:9100
+
+  - job_name: mysql
+    static_configs:
+      - targets:
+          - readle-mysqld-exporter:9104
+
+  - job_name: podman
+    static_configs:
+      - targets:
+          - readle-podman-exporter:9882

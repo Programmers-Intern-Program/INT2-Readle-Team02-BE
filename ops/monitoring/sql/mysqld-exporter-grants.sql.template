@@ -1,0 +1,4 @@
+CREATE USER IF NOT EXISTS 'readle_exporter'@'%' IDENTIFIED BY 'replace-with-exporter-password' WITH MAX_USER_CONNECTIONS 3;
+GRANT PROCESS, REPLICATION CLIENT ON *.* TO 'readle_exporter'@'%';
+GRANT SELECT ON performance_schema.* TO 'readle_exporter'@'%';
+FLUSH PRIVILEGES;

@@ -24,6 +24,34 @@ The image namespace follows `github.repository_owner`. Before the repository tra
 - The active backend is a state-driven slot and may be either `readle-backend-blue` or `readle-backend-green`.
 - MySQL is a singleton and is not recreated during application deployment.
 
+## Monitoring contract
+
+Monitoring rollout은 docs repo의 `../../docs/INFRA_POLICY.md`와 ADR-012를 기준으로 한다.
+
+Deploy helper는 edge cutover 성공 뒤에만 active backend scrape target을 publish한다. Target file은 monitoring stack이 소유하는 Prometheus `file_sd_configs` input이며, `/var/lib/readle/monitoring/prometheus/file_sd/backend-active.json`에 `readle-private`의 active blue/green backend hostname으로 atomic update한다.
+
+Monitoring은 application deployment를 gate하지 않는다.
+
+- Prometheus reload/watch 실패는 성공한 backend deployment를 실패 처리하거나 rollback하지 않는다.
+- Candidate cutover 실패는 candidate scrape target을 publish하지 않는다.
+- Rollback은 Nginx가 서빙하는 active slot으로 scrape target을 되돌린다.
+- Verification은 active slot state, rendered Nginx upstream, file-SD target을 비교한다.
+
+Backend metrics endpoint는 `/api/actuator/prometheus`를 유지한다. 이 endpoint는 application boundary에서 Basic username `readle-monitor`와 root-only password file의 scoped scrape credential을 요구한다. Prometheus는 `readle-private`에서 active backend hostname으로만 scrape하며, public Nginx server block에는 `ops/monitoring/nginx/prometheus-metrics-deny.conf.template`의 exact location을 include해 외부 요청을 `403`으로 차단한다. Basic Auth는 이 Nginx 차단을 대체하지 않는 추가 방어선이다.
+
+`readle-monitoring verify-host`는 Nginx rendered config와 local edge request의 `403`을 함께 확인한다. 배포 후에는 외부 네트워크에서도 다음을 확인한다.
+
+```bash
+curl -o /dev/null -sS -w '%{http_code}\n' https://<service-host>/api/actuator/prometheus
+# 403 expected
+```
+
+Grafana Nginx host wiring is an explicit prerequisite: install the exact `/grafana` redirect,
+`^~ /grafana/` proxy, `/grafana/login` rate-limit location, and a matching
+`readle_grafana_login` `limit_req_zone` from `ops/monitoring/nginx/`. `readle-monitoring verify-host`
+rejects hosts where those fragments are absent; it does not mutate the running Nginx container
+automatically.
+
 ## Required first-deploy checks
 
 The GHCR package remains **private**. EC2 authenticates with a dedicated GitHub account credential that has only `read:packages` and package read access. Store `GHCR_USERNAME` and `GHCR_PULL_TOKEN` only in the EC2 deployment environment; never commit them to this repository.

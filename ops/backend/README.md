@@ -94,6 +94,13 @@ include /etc/nginx/readle-backend-upstream.conf;
 
 `/var/lib/readle/backend-deploy.env`의 active slot은 이 include와 일치해야 합니다.
 
+## Prometheus active backend file-SD
+
+헬퍼는 successful cutover 뒤 Prometheus active backend target을
+`/var/lib/readle/monitoring/prometheus/file_sd/backend-active.json`에 atomic update합니다.
+Monitoring Prometheus는 이 host state directory를 `/etc/prometheus/file_sd`로 read-only
+mount합니다. 경로를 바꾸는 host만 `READLE_PROMETHEUS_FILE_SD_ACTIVE_TARGET`를 명시합니다.
+
 ## Slot과 리소스 제한
 
 헬퍼는 다음 두 개의 고정 백엔드 slot을 사용합니다.

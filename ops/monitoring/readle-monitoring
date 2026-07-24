@@ -1,0 +1,410 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_ROOT="${READLE_MONITORING_CONFIG_ROOT:-/opt/readle/monitoring}"
+STATE_ROOT="${READLE_MONITORING_STATE_ROOT:-/var/lib/readle/monitoring}"
+SECRET_ROOT="${READLE_MONITORING_SECRET_ROOT:-/etc/readle/monitoring}"
+QUADLET_DIR="${READLE_MONITORING_QUADLET_DIR:-/etc/containers/systemd}"
+NGINX_DIR="${READLE_NGINX_DIR:-/opt/readle/nginx}"
+PROMETHEUS_STATE_OWNER="65534:65534"
+GRAFANA_STATE_OWNER="472:0"
+GRAFANA_ADMIN_SECRET_OWNER="root:root"
+GRAFANA_ADMIN_SECRET_MODE="640"
+BACKEND_METRICS_SECRET_OWNER="root:65534"
+BACKEND_METRICS_SECRET_MODE="640"
+MYSQLD_EXPORTER_SECRET_OWNER="root:65534"
+MYSQLD_EXPORTER_SECRET_MODE="640"
+BACKEND_STATE_FILE="${READLE_BACKEND_STATE_FILE:-/var/lib/readle/backend-deploy.env}"
+BACKEND_NGINX_INCLUDE_HOST="${READLE_BACKEND_NGINX_INCLUDE_HOST:-/opt/readle/nginx/readle-backend-upstream.conf}"
+NGINX_CONTAINER="${READLE_NGINX_CONTAINER:-readle-nginx}"
+NGINX_EDGE_METRICS_URL="${READLE_NGINX_EDGE_METRICS_URL:-http://127.0.0.1/api/actuator/prometheus}"
+PUBLIC_NETWORK="${READLE_PUBLIC_NETWORK:-readle-public}"
+PRIVATE_NETWORK="${READLE_PRIVATE_NETWORK:-readle-private}"
+PODMAN_SOCKET="${READLE_PODMAN_SOCKET:-/run/podman/podman.sock}"
+NODE_EXPORTER_ROOTFS="${READLE_NODE_EXPORTER_ROOTFS:-/}"
+NODE_EXPORTER_TEXTFILE_DIR="${READLE_NODE_EXPORTER_TEXTFILE_DIR:-/var/lib/node_exporter/textfile_collector}"
+JOURNALD_CONF_DIR="${READLE_JOURNALD_CONF_DIR:-/etc/systemd/journald.conf.d}"
+JOURNALD_CONF_FILE="$JOURNALD_CONF_DIR/90-readle-monitoring.conf"
+SLOT_A="readle-backend-blue"
+SLOT_B="readle-backend-green"
+
+log() { printf '%s\n' "$*" >&2; }
+die() { log "error: $*"; exit 1; }
+
+need_root() {
+  [[ "${EUID:-$(id -u)}" == 0 ]] || die "run as root on the target host"
+}
+
+backup_if_present() {
+  local path="$1" stamp
+  [[ -e "$path" ]] || return 0
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  cp -a "$path" "$path.bak.$stamp"
+}
+
+install_file() {
+  local src="$1" dst="$2" mode="$3"
+  mkdir -p "$(dirname "$dst")"
+  if [[ -e "$dst" ]] && ! cmp -s "$src" "$dst"; then
+    backup_if_present "$dst"
+  fi
+  install -m "$mode" "$src" "$dst"
+}
+
+purge_macos_sidecars() {
+  local root="$1"
+  [[ -d "$root" ]] || return 0
+  find "$root" -type f -name '._*' -delete
+}
+
+install_tree_files() {
+  local src_root="$1" dst_root="$2" mode="$3" file rel
+  while IFS= read -r file; do
+    [[ "$(basename "$file")" == ._* ]] && continue
+    rel="${file#"$src_root"/}"
+    install_file "$file" "$dst_root/$rel" "$mode"
+  done < <(find "$src_root" -type f | sort)
+  purge_macos_sidecars "$dst_root"
+}
+
+validate_slot() {
+  [[ "$1" == "$SLOT_A" || "$1" == "$SLOT_B" ]]
+}
+
+active_slot_from_state() {
+  local line slot=""
+  [[ -r "$BACKEND_STATE_FILE" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      active_slot=*)
+        [[ -z "$slot" ]] || return 1
+        slot="${line#active_slot=}"
+        validate_slot "$slot" || return 1
+        ;;
+    esac
+  done < "$BACKEND_STATE_FILE"
+  [[ -n "$slot" ]] || return 1
+  printf '%s\n' "$slot"
+}
+
+prometheus_file_sd_document() {
+  printf '[{"targets":["%s:8080"]}]\n' "$1"
+}
+
+install_prometheus_file_sd_active_target() {
+  local target="$STATE_ROOT/prometheus/file_sd/backend-active.json" slot temp
+  if [[ -f "$target" ]]; then
+    log "preserved existing Prometheus active backend file-SD target: $target"
+    return 0
+  fi
+  slot="$(active_slot_from_state)" || die "missing deploy helper active slot state for Prometheus file-SD target"
+  grep -qx "server $slot:8080;" "$BACKEND_NGINX_INCLUDE_HOST" ||
+    die "deploy helper state does not match Nginx upstream include for Prometheus file-SD target"
+  mkdir -p "$(dirname "$target")"
+  temp="$(mktemp "$(dirname "$target")/.backend-active.json.XXXXXX")" || return 1
+  prometheus_file_sd_document "$slot" > "$temp" || { rm -f "$temp"; return 1; }
+  chmod 644 "$temp" || { rm -f "$temp"; return 1; }
+  mv -f "$temp" "$target"
+}
+
+provision_prometheus_state() {
+  mkdir -p "$STATE_ROOT/prometheus/file_sd"
+  chown -R "$PROMETHEUS_STATE_OWNER" "$STATE_ROOT/prometheus"
+}
+
+provision_grafana_state() {
+  mkdir -p "$STATE_ROOT/grafana"
+  chown -R "$GRAFANA_STATE_OWNER" "$STATE_ROOT/grafana"
+}
+
+provision_grafana_admin_secret() {
+  local path="$SECRET_ROOT/grafana-admin-password"
+  [[ -f "$path" ]] || die "missing Grafana admin password: $path"
+  chown "$GRAFANA_ADMIN_SECRET_OWNER" "$path"
+  chmod "$GRAFANA_ADMIN_SECRET_MODE" "$path"
+}
+
+provision_backend_metrics_secret() {
+  local path="$SECRET_ROOT/backend-metrics-password"
+  [[ -f "$path" ]] || die "missing backend metrics password: $path"
+  chown "$BACKEND_METRICS_SECRET_OWNER" "$path"
+  chmod "$BACKEND_METRICS_SECRET_MODE" "$path"
+}
+
+ensure_secret_file() {
+  local path="$1" env_name="$2" description="$3" value
+  value="${!env_name:-}"
+  mkdir -p "$(dirname "$path")"
+  if [[ -f "$path" ]]; then
+    chmod 600 "$path"
+    return 0
+  fi
+  [[ -n "$value" ]] || die "missing $description: create $path or set $env_name"
+  umask 077
+  printf '%s\n' "$value" > "$path"
+}
+
+provision_mysqld_exporter_secret() {
+  local path="$SECRET_ROOT/mysqld-exporter.cnf"
+  [[ -f "$path" ]] || die "missing MySQL exporter credential: $path"
+  chown "$MYSQLD_EXPORTER_SECRET_OWNER" "$path"
+  chmod "$MYSQLD_EXPORTER_SECRET_MODE" "$path"
+}
+
+preflight() {
+  command -v podman >/dev/null || die "missing podman"
+  command -v systemctl >/dev/null || die "missing systemctl"
+  [[ "$PUBLIC_NETWORK" == readle-public ]] || die "unexpected public network: $PUBLIC_NETWORK"
+  [[ "$PRIVATE_NETWORK" == readle-private ]] || die "unexpected private network: $PRIVATE_NETWORK"
+  podman network exists "$PUBLIC_NETWORK" || die "missing network: $PUBLIC_NETWORK"
+  podman network exists "$PRIVATE_NETWORK" || die "missing network: $PRIVATE_NETWORK"
+  [[ -d "$NODE_EXPORTER_ROOTFS" && "$NODE_EXPORTER_ROOTFS" == "/" ]] || die "node exporter rootfs must be configured to / for host metrics"
+  [[ "$PODMAN_SOCKET" == unix://* ]] && die "READLE_PODMAN_SOCKET must be a filesystem path, not a URI"
+  [[ -S "$PODMAN_SOCKET" ]] || die "missing Podman Unix socket: $PODMAN_SOCKET"
+  [[ "$PODMAN_SOCKET" != *"://"* ]] || die "Podman TCP socket is not allowed"
+}
+
+install_bundle() {
+  need_root
+  preflight
+  mkdir -p "$CONFIG_ROOT" "$STATE_ROOT/grafana" "$SECRET_ROOT" "$QUADLET_DIR" "$NGINX_DIR" "$NODE_EXPORTER_TEXTFILE_DIR" "$JOURNALD_CONF_DIR"
+  install_tree_files "$SOURCE_DIR/config/prometheus" "$CONFIG_ROOT/prometheus" 0644
+  install_prometheus_file_sd_active_target
+  provision_prometheus_state
+  provision_grafana_state
+  install_tree_files "$SOURCE_DIR/config/grafana" "$CONFIG_ROOT/grafana" 0644
+  install_tree_files "$SOURCE_DIR/quadlet" "$QUADLET_DIR" 0644
+  install_file "$SOURCE_DIR/nginx/prometheus-metrics-deny.conf.template" "$NGINX_DIR/prometheus-metrics-deny.conf" 0644
+  install_file "$SOURCE_DIR/nginx/grafana-subpath.conf.template" "$NGINX_DIR/grafana-subpath.conf" 0644
+  install_file "$SOURCE_DIR/nginx/rate-limit-zones.conf.template" "$NGINX_DIR/rate-limit-zones.conf" 0644
+  install_file "$SOURCE_DIR/systemd/journald-readle.conf.template" "$JOURNALD_CONF_FILE" 0644
+  ensure_secret_file "$SECRET_ROOT/backend-metrics-password" READLE_BACKEND_METRICS_PASSWORD "backend Basic scrape password"
+  provision_backend_metrics_secret
+  ensure_secret_file "$SECRET_ROOT/grafana-admin-password" READLE_GRAFANA_ADMIN_PASSWORD "Grafana admin password"
+  provision_grafana_admin_secret
+  provision_mysqld_exporter_secret
+  systemctl daemon-reload
+  log "installed monitoring files; Quadlet [Install] entries preserve boot behavior; start services after capacity gate with: systemctl start prometheus readle-node-exporter readle-mysqld-exporter readle-podman-exporter grafana"
+}
+
+verify_static_files() {
+  grep -R -nE '(^|[[:space:]])PublishPort=|--publish|Network=host' "$SOURCE_DIR/quadlet" && die "monitoring units expose host networking"
+  grep -R -nE 'Image=[^@[:space:]]+:[^@[:space:]]+($|[[:space:]])|^[A-Z_]+_IMAGE=[^@[:space:]]+:[^@[:space:]]+($|[[:space:]])' "$SOURCE_DIR/quadlet" "$SOURCE_DIR/images.env" && die "image refs must be digest pinned"
+  grep -q 'storage.tsdb.retention.time=3d' "$SOURCE_DIR/quadlet/prometheus.container" || die "missing Prometheus time retention"
+  grep -q 'storage.tsdb.retention.size=512MB' "$SOURCE_DIR/quadlet/prometheus.container" || die "missing Prometheus size retention"
+  grep -q 'password_file: /run/secrets/readle-backend-metrics-password' "$SOURCE_DIR/config/prometheus/prometheus.yml" || die "missing backend Basic auth password file"
+  grep -q "find \"\$root\" -type f -name '._\*' -delete" "$SOURCE_DIR/readle-monitoring" || die "installer must purge macOS sidecar files from managed tree targets"
+  grep -q '\[\[ "$(basename "$file")" == ._\* \]\] && continue' "$SOURCE_DIR/readle-monitoring" || die "installer must skip macOS sidecar files in source trees"
+  grep -q 'purge_macos_sidecars "$dst_root"' "$SOURCE_DIR/readle-monitoring" || die "installer must clean stale macOS sidecar files after tree install"
+  grep -q 'BACKEND_METRICS_SECRET_OWNER="root:65534"' "$SOURCE_DIR/readle-monitoring" || die "backend metrics secret owner must allow Prometheus uid 65534 gid 65534 read access"
+  grep -q 'BACKEND_METRICS_SECRET_MODE="640"' "$SOURCE_DIR/readle-monitoring" || die "backend metrics secret mode must deny world access"
+  grep -q 'chown "$BACKEND_METRICS_SECRET_OWNER" "$path"' "$SOURCE_DIR/readle-monitoring" || die "installer must chown backend metrics secret for Prometheus group read access"
+  grep -q 'chmod "$BACKEND_METRICS_SECRET_MODE" "$path"' "$SOURCE_DIR/readle-monitoring" || die "installer must chmod backend metrics secret without world access"
+  grep -q '^  provision_backend_metrics_secret$' "$SOURCE_DIR/readle-monitoring" || die "installer must provision backend metrics secret during install"
+  grep -q 'username: readle-monitor' "$SOURCE_DIR/config/prometheus/prometheus.yml" || die "backend scrape username must be readle-monitor"
+  grep -q 'file_sd_configs:' "$SOURCE_DIR/config/prometheus/prometheus.yml" || die "missing backend file-SD"
+  [[ -f "$SOURCE_DIR/config/prometheus/file_sd/.gitkeep" ]] || die "missing Prometheus file-SD mount target placeholder"
+  [[ ! -e "$SOURCE_DIR/config/prometheus/file_sd/backend-active.json" ]] || die "monitoring bundle must not ship an active backend file-SD target"
+  grep -q 'Volume=/var/lib/readle/monitoring/prometheus/file_sd:/etc/prometheus/file_sd:ro' "$SOURCE_DIR/quadlet/prometheus.container" || die "missing Prometheus file-SD host state mount"
+  grep -q 'Volume=/var/lib/readle/monitoring/prometheus:/prometheus' "$SOURCE_DIR/quadlet/prometheus.container" || die "missing Prometheus writable host state mount"
+  grep -q 'PROMETHEUS_STATE_OWNER="65534:65534"' "$SOURCE_DIR/readle-monitoring" || die "Prometheus state owner must match pinned image uid:gid"
+  grep -q 'chown -R "$PROMETHEUS_STATE_OWNER" "$STATE_ROOT/prometheus"' "$SOURCE_DIR/readle-monitoring" || die "installer must chown Prometheus state for non-root runtime"
+  [[ "$(grep -c '^  provision_prometheus_state$' "$SOURCE_DIR/readle-monitoring")" -ge 2 ]] || die "installer must provision Prometheus state during install and self-test"
+  ! grep -Eq '(^User=(0|root)(:|$)|--user[= ](0|root)(:|$))' "$SOURCE_DIR/quadlet/prometheus.container" || die "Prometheus must not run as root"
+  grep -q 'Volume=/var/lib/readle/monitoring/grafana:/var/lib/grafana' "$SOURCE_DIR/quadlet/grafana.container" || die "missing Grafana writable host state mount"
+  grep -q 'GRAFANA_STATE_OWNER="472:0"' "$SOURCE_DIR/readle-monitoring" || die "Grafana state owner must match pinned image uid:gid"
+  grep -q 'chown -R "$GRAFANA_STATE_OWNER" "$STATE_ROOT/grafana"' "$SOURCE_DIR/readle-monitoring" || die "installer must chown Grafana state for non-root runtime"
+  [[ "$(grep -c '^  provision_grafana_state$' "$SOURCE_DIR/readle-monitoring")" -ge 2 ]] || die "installer must provision Grafana state during install and self-test"
+  grep -q 'GRAFANA_ADMIN_SECRET_OWNER="root:root"' "$SOURCE_DIR/readle-monitoring" || die "Grafana admin secret owner must allow root-group read access for Grafana uid 472 gid 0"
+  grep -q 'GRAFANA_ADMIN_SECRET_MODE="640"' "$SOURCE_DIR/readle-monitoring" || die "Grafana admin secret mode must deny world access"
+  grep -q 'chown "$GRAFANA_ADMIN_SECRET_OWNER" "$path"' "$SOURCE_DIR/readle-monitoring" || die "installer must chown Grafana admin secret for Grafana group read access"
+  grep -q 'chmod "$GRAFANA_ADMIN_SECRET_MODE" "$path"' "$SOURCE_DIR/readle-monitoring" || die "installer must chmod Grafana admin secret without world access"
+  grep -q '^  provision_grafana_admin_secret$' "$SOURCE_DIR/readle-monitoring" || die "installer must provision Grafana admin secret during install"
+  ! grep -q 'systemctl enable --''now' "$SOURCE_DIR/readle-monitoring" || die "monitoring installer must not enable generated Quadlet units at start time"
+  grep -q 'systemctl start prometheus readle-node-exporter readle-mysqld-exporter readle-podman-exporter grafana' "$SOURCE_DIR/readle-monitoring" || die "monitoring installer must instruct systemctl start for generated Quadlet units"
+  grep -q 'Volume=/var/lib/node_exporter/textfile_collector:/var/lib/node_exporter/textfile_collector:ro' "$SOURCE_DIR/quadlet/readle-node-exporter.container" || die "missing node_exporter textfile collector mount"
+  grep -q -- '--collector.textfile.directory=/var/lib/node_exporter/textfile_collector' "$SOURCE_DIR/quadlet/readle-node-exporter.container" || die "missing node_exporter textfile collector flag"
+  grep -q '^host=readle-mysql$' "$SOURCE_DIR/secrets/mysqld-exporter.cnf.example" || die "MySQL exporter example must target readle-mysql"
+  grep -q 'MYSQLD_EXPORTER_SECRET_OWNER="root:65534"' "$SOURCE_DIR/readle-monitoring" || die "MySQL exporter secret owner must allow only root plus exporter group"
+  grep -q 'MYSQLD_EXPORTER_SECRET_MODE="640"' "$SOURCE_DIR/readle-monitoring" || die "MySQL exporter secret mode must deny world access"
+  grep -q 'chown "$MYSQLD_EXPORTER_SECRET_OWNER" "$path"' "$SOURCE_DIR/readle-monitoring" || die "installer must chown MySQL exporter cnf for exporter group read access"
+  grep -q 'chmod "$MYSQLD_EXPORTER_SECRET_MODE" "$path"' "$SOURCE_DIR/readle-monitoring" || die "installer must chmod MySQL exporter cnf without world access"
+  grep -q '^User=0:0$' "$SOURCE_DIR/quadlet/readle-podman-exporter.container" || die "Podman exporter must run as root for the rootful Podman socket"
+  grep -q '^Environment=HOME=/tmp$' "$SOURCE_DIR/quadlet/readle-podman-exporter.container" || die "Podman exporter HOME must be writable tmpfs"
+  grep -q '^Environment=XDG_CONFIG_HOME=/tmp$' "$SOURCE_DIR/quadlet/readle-podman-exporter.container" || die "Podman exporter XDG config must be writable tmpfs"
+  grep -q 'Volume=/run/podman/podman.sock:/run/podman/podman.sock:ro' "$SOURCE_DIR/quadlet/readle-podman-exporter.container" || die "Podman socket mount must stay read-only"
+  ! grep -Eq '(^|[[:space:]])PublishPort=|--publish|Network=host' "$SOURCE_DIR/quadlet/readle-podman-exporter.container" || die "Podman exporter must not expose host ports or host networking"
+  grep -Fxq "CREATE USER IF NOT EXISTS 'readle_exporter'@'%' IDENTIFIED BY 'replace-with-exporter-password' WITH MAX_USER_CONNECTIONS 3;" "$SOURCE_DIR/sql/mysqld-exporter-grants.sql.template" || die "missing MySQL exporter least-privilege MySQL 8 connection cap syntax"
+  grep -q 'SystemMaxUse=256M' "$SOURCE_DIR/systemd/journald-readle.conf.template" || die "missing bounded journald quota template"
+  grep -q 'serve_from_sub_path = true' "$SOURCE_DIR/config/grafana/grafana.ini" || die "Grafana subpath is disabled"
+  grep -Fxq 'location = /api/actuator/prometheus {' "$SOURCE_DIR/nginx/prometheus-metrics-deny.conf.template" || die "missing exact public metrics location"
+  grep -Fxq '    deny all;' "$SOURCE_DIR/nginx/prometheus-metrics-deny.conf.template" || die "missing public metrics deny"
+  grep -Fxq '    return 403;' "$SOURCE_DIR/nginx/prometheus-metrics-deny.conf.template" || die "missing public metrics status"
+  grep -q 'location = /grafana' "$SOURCE_DIR/nginx/grafana-subpath.conf.template" || die "missing exact Grafana route"
+  grep -q 'location \^~ /grafana/' "$SOURCE_DIR/nginx/grafana-subpath.conf.template" || die "Grafana subpath route must use ^~"
+  grep -q 'limit_req zone=readle_grafana_login' "$SOURCE_DIR/nginx/grafana-subpath.conf.template" || die "missing Grafana login rate-limit location"
+  grep -q 'limit_req_zone .*zone=readle_grafana_login:' "$SOURCE_DIR/nginx/rate-limit-zones.conf.template" || die "missing Grafana rate-limit zone template"
+  bash -n "$SOURCE_DIR/readle-monitoring"
+  bash -n "$SOURCE_DIR/test-monitoring-bundle.sh"
+}
+
+verify_metrics_edge_denied() {
+  local status
+  command -v curl >/dev/null || die "missing curl for Nginx metrics edge check"
+  status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$NGINX_EDGE_METRICS_URL")" ||
+    die "failed to request Nginx metrics edge URL: $NGINX_EDGE_METRICS_URL"
+  [[ "$status" == "403" ]] || die "Nginx metrics edge URL must return 403, got $status: $NGINX_EDGE_METRICS_URL"
+}
+
+self_test() {
+  local root existing target secret_file backend_secret grafana_secret mysql_secret chown_log chmod_log original_edge_url READLE_MONITORING_SELF_TEST_SECRET
+  root="$(mktemp -d "${TMPDIR:-/tmp}/readle-monitoring.XXXXXX")"
+  trap "rm -rf '$root'" EXIT
+  CONFIG_ROOT="$root/config"
+  STATE_ROOT="$root/state"
+  SECRET_ROOT="$root/secrets"
+  BACKEND_STATE_FILE="$root/backend-deploy.env"
+  BACKEND_NGINX_INCLUDE_HOST="$root/backend-upstream.conf"
+  original_edge_url="$NGINX_EDGE_METRICS_URL"
+  NGINX_EDGE_METRICS_URL="http://nginx.test/api/actuator/prometheus"
+  target="$STATE_ROOT/prometheus/file_sd/backend-active.json"
+
+  mkdir -p "$root/source-tree/provisioning" "$root/installed-tree/provisioning"
+  printf '%s\n' 'apiVersion: 1' > "$root/source-tree/provisioning/readle.yml"
+  printf '%s\n' 'bad-yaml-sidecar' > "$root/source-tree/provisioning/._readle.yml"
+  printf '%s\n' 'stale-yaml-sidecar' > "$root/installed-tree/provisioning/._readle.yml"
+  install_tree_files "$root/source-tree" "$root/installed-tree" 0644
+  [[ -f "$root/installed-tree/provisioning/readle.yml" ]] || die "self-test did not install regular tree file"
+  [[ ! -e "$root/installed-tree/provisioning/._readle.yml" ]] || die "self-test left macOS sidecar in installed tree"
+
+  install_tree_files "$SOURCE_DIR/config/prometheus" "$CONFIG_ROOT/prometheus" 0644
+  [[ -d "$CONFIG_ROOT/prometheus/file_sd" ]] || die "self-test did not install Prometheus file-SD mount target"
+  [[ ! -e "$CONFIG_ROOT/prometheus/file_sd/backend-active.json" ]] || die "self-test installed active Prometheus file-SD target into config"
+
+  mkdir -p "$(dirname "$target")"
+  existing='[{"targets":["readle-backend-green:8080"]}]'
+  printf '%s\n' "$existing" > "$target"
+  printf '%s\n' 'active_slot=readle-backend-blue' > "$BACKEND_STATE_FILE"
+  printf '%s\n' 'server readle-backend-blue:8080;' > "$BACKEND_NGINX_INCLUDE_HOST"
+  install_prometheus_file_sd_active_target
+  grep -qxF "$existing" "$target" || die "self-test overwrote existing Prometheus file-SD target"
+
+  rm -f "$target"
+  printf '%s\n' 'active_slot=readle-backend-green' > "$BACKEND_STATE_FILE"
+  printf '%s\n' 'server readle-backend-green:8080;' > "$BACKEND_NGINX_INCLUDE_HOST"
+  install_prometheus_file_sd_active_target
+  prometheus_file_sd_document readle-backend-green | cmp -s - "$target" ||
+    die "self-test did not derive canonical Prometheus file-SD target"
+
+  chown_log="$root/chown.log"
+  chown() { printf '%s\n' "$*" > "$chown_log"; }
+  provision_prometheus_state
+  unset -f chown
+  grep -qxF -- "-R $PROMETHEUS_STATE_OWNER $STATE_ROOT/prometheus" "$chown_log" ||
+    die "self-test did not chown Prometheus state for non-root runtime"
+
+  chown() { printf '%s\n' "$*" > "$chown_log"; }
+  provision_grafana_state
+  unset -f chown
+  grep -qxF -- "-R $GRAFANA_STATE_OWNER $STATE_ROOT/grafana" "$chown_log" ||
+    die "self-test did not chown Grafana state for non-root runtime"
+
+  rm -f "$target"
+  printf '%s\n' 'server readle-backend-blue:8080;' > "$BACKEND_NGINX_INCLUDE_HOST"
+  if ( install_prometheus_file_sd_active_target ) 2>/dev/null; then
+    die "self-test accepted mismatched deploy state and Nginx upstream"
+  fi
+
+  secret_file="$root/secrets/generated-secret"
+  READLE_MONITORING_SELF_TEST_SECRET="generated-secret"
+  ensure_secret_file "$secret_file" READLE_MONITORING_SELF_TEST_SECRET "self-test secret"
+  grep -qxF "generated-secret" "$secret_file" || die "self-test did not create secret file from environment"
+
+  READLE_MONITORING_SELF_TEST_SECRET="replacement-secret"
+  ensure_secret_file "$secret_file" READLE_MONITORING_SELF_TEST_SECRET "self-test secret"
+  grep -qxF "generated-secret" "$secret_file" || die "self-test overwrote existing secret file"
+
+  backend_secret="$SECRET_ROOT/backend-metrics-password"
+  READLE_MONITORING_SELF_TEST_SECRET="backend-secret"
+  ensure_secret_file "$backend_secret" READLE_MONITORING_SELF_TEST_SECRET "backend metrics self-test secret"
+  READLE_MONITORING_SELF_TEST_SECRET="replacement-backend-secret"
+  ensure_secret_file "$backend_secret" READLE_MONITORING_SELF_TEST_SECRET "backend metrics self-test secret"
+  grep -qxF "backend-secret" "$backend_secret" || die "self-test overwrote existing backend metrics secret"
+  chown_log="$root/backend-chown.log"
+  chmod_log="$root/backend-chmod.log"
+  chown() { printf '%s\n' "$*" > "$chown_log"; }
+  chmod() { printf '%s\n' "$*" > "$chmod_log"; }
+  provision_backend_metrics_secret
+  unset -f chown chmod
+  grep -qxF -- "$BACKEND_METRICS_SECRET_OWNER $backend_secret" "$chown_log" ||
+    die "self-test did not chown backend metrics secret for Prometheus group read access"
+  grep -qxF -- "$BACKEND_METRICS_SECRET_MODE $backend_secret" "$chmod_log" ||
+    die "self-test did not chmod backend metrics secret without world access"
+  grep -qxF "backend-secret" "$backend_secret" || die "self-test changed backend metrics secret content"
+
+  grafana_secret="$SECRET_ROOT/grafana-admin-password"
+  READLE_MONITORING_SELF_TEST_SECRET="grafana-secret"
+  ensure_secret_file "$grafana_secret" READLE_MONITORING_SELF_TEST_SECRET "Grafana self-test secret"
+  grep -qxF "grafana-secret" "$grafana_secret" || die "self-test did not create Grafana admin secret from environment"
+  chown_log="$root/grafana-chown.log"
+  chmod_log="$root/grafana-chmod.log"
+  chown() { printf '%s\n' "$*" > "$chown_log"; }
+  chmod() { printf '%s\n' "$*" > "$chmod_log"; }
+  provision_grafana_admin_secret
+  unset -f chown chmod
+  grep -qxF -- "$GRAFANA_ADMIN_SECRET_OWNER $grafana_secret" "$chown_log" ||
+    die "self-test did not chown Grafana admin secret for Grafana group read access"
+  grep -qxF -- "$GRAFANA_ADMIN_SECRET_MODE $grafana_secret" "$chmod_log" ||
+    die "self-test did not chmod Grafana admin secret without world access"
+
+  mysql_secret="$SECRET_ROOT/mysqld-exporter.cnf"
+  printf '%s\n' '[client]' > "$mysql_secret"
+  chown_log="$root/mysql-chown.log"
+  chmod_log="$root/mysql-chmod.log"
+  chown() { printf '%s\n' "$*" > "$chown_log"; }
+  chmod() { printf '%s\n' "$*" > "$chmod_log"; }
+  provision_mysqld_exporter_secret
+  unset -f chown chmod
+  grep -qxF -- "$MYSQLD_EXPORTER_SECRET_OWNER $mysql_secret" "$chown_log" ||
+    die "self-test did not chown MySQL exporter cnf for exporter group read access"
+  grep -qxF -- "$MYSQLD_EXPORTER_SECRET_MODE $mysql_secret" "$chmod_log" ||
+    die "self-test did not chmod MySQL exporter cnf without world access"
+
+  curl() { printf '403'; }
+  verify_metrics_edge_denied
+  curl() { printf '200'; }
+  if ( verify_metrics_edge_denied ) >/dev/null 2>&1; then
+    die "self-test accepted a public metrics edge response"
+  fi
+  unset -f curl
+  NGINX_EDGE_METRICS_URL="$original_edge_url"
+}
+
+verify_host() {
+  need_root
+  verify_static_files
+  [[ -f "$NGINX_DIR/prometheus-metrics-deny.conf" ]] || die "Nginx deny fragment not installed"
+  [[ -f "$NGINX_DIR/grafana-subpath.conf" ]] || die "Grafana Nginx fragment not installed"
+  [[ -f "$NGINX_DIR/rate-limit-zones.conf" ]] || die "Nginx rate-limit zone fragment must be installed on host"
+  grep -q 'limit_req_zone .*zone=readle_grafana_login:' "$NGINX_DIR/rate-limit-zones.conf" || die "missing readle_grafana_login rate-limit zone"
+  grep -q 'limit_req zone=readle_grafana_login' "$NGINX_DIR/grafana-subpath.conf" || die "Grafana rate-limit location not installed"
+  [[ -d "$STATE_ROOT/prometheus/file_sd" ]] || die "Prometheus file-SD state directory missing"
+  [[ -f "$STATE_ROOT/prometheus/file_sd/backend-active.json" ]] || die "Prometheus active backend file-SD target missing"
+  [[ -d "$NODE_EXPORTER_TEXTFILE_DIR" ]] || die "node_exporter textfile collector directory missing"
+  [[ -f "$JOURNALD_CONF_FILE" ]] || die "journald quota config not installed"
+  grep -q 'SystemMaxUse=256M' "$JOURNALD_CONF_FILE" || die "journald quota config is not bounded"
+  podman exec "$NGINX_CONTAINER" nginx -T 2>/dev/null | grep -F 'location = /api/actuator/prometheus' >/dev/null || die "Nginx does not include metrics deny location"
+  podman exec "$NGINX_CONTAINER" nginx -T 2>/dev/null | grep -F 'location ^~ /grafana/' >/dev/null || die "Nginx does not include Grafana subpath location"
+  podman exec "$NGINX_CONTAINER" nginx -t >/dev/null
+  verify_metrics_edge_denied
+}
+
+case "${1:-}" in
+  install) install_bundle ;;
+  preflight) need_root; preflight ;;
+  verify-static) verify_static_files ;;
+  verify-host) verify_host ;;
+  self-test) self_test ;;
+  *) die "usage: $0 install|preflight|verify-static|verify-host|self-test" ;;
+esac

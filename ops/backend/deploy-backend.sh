@@ -9,6 +9,7 @@ LOCK_FILE="${READLE_BACKEND_LOCK_FILE:-/run/lock/readle-backend-deploy.lock}"
 NGINX="${READLE_NGINX_CONTAINER:-readle-nginx}"
 NGINX_UPSTREAM_INCLUDE="${READLE_BACKEND_NGINX_INCLUDE:-/etc/nginx/readle-backend-upstream.conf}"
 NGINX_UPSTREAM_INCLUDE_HOST="${READLE_BACKEND_NGINX_INCLUDE_HOST:-/opt/readle/nginx/readle-backend-upstream.conf}"
+PROMETHEUS_FILE_SD_ACTIVE_TARGET="${READLE_PROMETHEUS_FILE_SD_ACTIVE_TARGET:-/var/lib/readle/monitoring/prometheus/file_sd/backend-active.json}"
 PUBLIC_NETWORK="${READLE_BACKEND_PUBLIC_NETWORK:-readle-public}"
 PRIVATE_NETWORK="${READLE_BACKEND_PRIVATE_NETWORK:-readle-private}"
 SLOT_A="readle-backend-blue"
@@ -46,6 +47,10 @@ inactive_slot() {
 
 validate_nginx_include_path() {
   [[ "$1" =~ ^/[A-Za-z0-9._/-]+$ && "$1" != *"/../"* && "$1" != *"/.." ]]
+}
+
+validate_prometheus_file_sd_path() {
+  [[ "$1" =~ ^/[A-Za-z0-9._/-]+[.]json$ && "$1" != *"/../"* && "$1" != *"/.." ]]
 }
 
 load_image_prefix() {
@@ -317,6 +322,62 @@ restore_nginx_include() {
   chmod 644 "$NGINX_UPSTREAM_INCLUDE_HOST"
 }
 
+prometheus_file_sd_document() {
+  printf '[{"targets":["%s:8080"]}]\n' "$1"
+}
+
+write_prometheus_file_sd_active_target() {
+  local slot="$1" target_dir temp
+  target_dir="$(dirname "$PROMETHEUS_FILE_SD_ACTIVE_TARGET")"
+  mkdir -p "$target_dir" || return 1
+  temp="$(mktemp "$target_dir/.backend-active.json.XXXXXX")" || return 1
+  if ! prometheus_file_sd_document "$slot" > "$temp"; then
+    rm -f "$temp"
+    return 1
+  fi
+  chmod 644 "$temp" || { rm -f "$temp"; return 1; }
+  mv -f "$temp" "$PROMETHEUS_FILE_SD_ACTIVE_TARGET"
+}
+
+prometheus_file_sd_matches_slot() {
+  prometheus_file_sd_document "$1" | cmp -s - "$PROMETHEUS_FILE_SD_ACTIVE_TARGET"
+}
+
+backup_prometheus_file_sd_active_target() {
+  local backup
+  backup="$(mktemp "${TMPDIR:-/tmp}/readle-prometheus-file-sd.XXXXXX")" || return 1
+  if [[ -f "$PROMETHEUS_FILE_SD_ACTIVE_TARGET" ]]; then
+    cp -p "$PROMETHEUS_FILE_SD_ACTIVE_TARGET" "$backup" || { rm -f "$backup"; return 1; }
+    printf '%s\n' 1 > "$backup.existed" || { rm -f "$backup"; return 1; }
+  else
+    : > "$backup" || { rm -f "$backup"; return 1; }
+    printf '%s\n' 0 > "$backup.existed" || { rm -f "$backup"; return 1; }
+  fi
+  printf '%s\n' "$backup"
+}
+
+restore_prometheus_file_sd_active_target() {
+  local backup="$1" target_dir temp
+  [[ -f "$backup.existed" ]] || return 1
+  if [[ "$(cat "$backup.existed")" == 1 ]]; then
+    target_dir="$(dirname "$PROMETHEUS_FILE_SD_ACTIVE_TARGET")"
+    mkdir -p "$target_dir" || return 1
+    temp="$(mktemp "$target_dir/.backend-active.json.restore.XXXXXX")" || return 1
+    if ! cat "$backup" > "$temp"; then
+      rm -f "$temp"
+      return 1
+    fi
+    chmod 644 "$temp" || { rm -f "$temp"; return 1; }
+    mv -f "$temp" "$PROMETHEUS_FILE_SD_ACTIVE_TARGET" || { rm -f "$temp"; return 1; }
+  else
+    rm -f "$PROMETHEUS_FILE_SD_ACTIVE_TARGET"
+  fi
+}
+
+remove_prometheus_file_sd_backup() {
+  rm -f "$1" "$1.existed"
+}
+
 nginx_references_include() {
   nginx_shell "grep -R -F 'include $NGINX_UPSTREAM_INCLUDE;' /etc/nginx >/dev/null 2>&1"
 }
@@ -392,6 +453,7 @@ validate_bootstrap_preflight() {
   local include_line include_slot
   validate_nginx_include_path "$NGINX_UPSTREAM_INCLUDE" || die "invalid Nginx include path"
   validate_nginx_include_path "$NGINX_UPSTREAM_INCLUDE_HOST" || die "invalid host Nginx include path"
+  validate_prometheus_file_sd_path "$PROMETHEUS_FILE_SD_ACTIVE_TARGET" || die "invalid Prometheus file-SD active target path"
   [[ -f "$NGINX_UPSTREAM_INCLUDE_HOST" ]] || die "missing host Nginx upstream include: $NGINX_UPSTREAM_INCLUDE_HOST"
   [[ -r "$ENV_FILE" ]] || die "missing backend env file: $ENV_FILE"
   container_exists "$NGINX" || die "missing Nginx container: $NGINX"
@@ -416,6 +478,7 @@ validate_backend_topology() {
   local include_line include_slot inactive
   validate_nginx_include_path "$NGINX_UPSTREAM_INCLUDE" || die "invalid Nginx include path"
   validate_nginx_include_path "$NGINX_UPSTREAM_INCLUDE_HOST" || die "invalid host Nginx include path"
+  validate_prometheus_file_sd_path "$PROMETHEUS_FILE_SD_ACTIVE_TARGET" || die "invalid Prometheus file-SD active target path"
   [[ -f "$NGINX_UPSTREAM_INCLUDE_HOST" ]] || die "missing host Nginx upstream include: $NGINX_UPSTREAM_INCLUDE_HOST"
   container_exists "$NGINX" || die "missing Nginx container: $NGINX"
   container_running "$NGINX" || die "Nginx container is not running: $NGINX"
@@ -436,6 +499,7 @@ validate_backend_topology() {
   [[ "$(container_image_id "$active_slot")" == "$last_good_image" ]] || die "active container image does not match state"
   [[ "$(container_deploy_ref "$active_slot")" == "$last_good_ref" ]] || die "active container ref does not match state"
   [[ "$(container_revision "$active_slot" 2>/dev/null || true)" == "$last_good_revision" ]] || die "active container revision does not match state"
+  prometheus_file_sd_matches_slot "$active_slot" || die "Prometheus file-SD active target does not match state"
 }
 
 verify_backend_topology() {
@@ -456,17 +520,21 @@ restore_include_or_die() {
 }
 
 rollback_after_flip() {
-  local include_backup="$1" candidate_slot="$2"
+  local include_backup="$1" candidate_slot="$2" prometheus_backup="${3:-}"
   restore_include_or_die "$include_backup"
   rm -f "$include_backup"
   edge_smoke_retry || die "rollback edge smoke failed"
+  if [[ -n "$prometheus_backup" ]]; then
+    restore_prometheus_file_sd_active_target "$prometheus_backup" || die "failed to restore Prometheus file-SD active target"
+    remove_prometheus_file_sd_backup "$prometheus_backup"
+  fi
   clear_pending
   save_state || die "failed to save rollback state"
   podman_cmd rm -f "$candidate_slot" >/dev/null 2>&1 || true
 }
 
 deploy() {
-  local image_ref="$1" expected_sha="$2" candidate_slot old_slot include_backup new_image
+  local image_ref="$1" expected_sha="$2" candidate_slot old_slot include_backup prometheus_backup new_image
   local old_active_slot old_last_good_image old_last_good_revision old_last_good_ref
   local old_previous_image old_previous_revision old_previous_ref
 
@@ -492,6 +560,9 @@ deploy() {
   old_previous_ref="$previous_ref"
 
   if [[ "$last_good_ref" == "$image_ref" && "$last_good_revision" == "$expected_sha" ]] && edge_smoke; then
+    if ! write_prometheus_file_sd_active_target "$active_slot"; then
+      log "warning: Prometheus file-SD publish failed; preserving healthy backend"
+    fi
     log "requested revision already live and healthy"
     return
   fi
@@ -507,9 +578,11 @@ deploy() {
   fi
 
   include_backup="$(backup_nginx_include)" || die "failed to backup Nginx upstream include"
+  prometheus_backup="$(backup_prometheus_file_sd_active_target)" || { rm -f "$include_backup"; die "failed to backup Prometheus file-SD active target"; }
   if ! write_nginx_include "$candidate_slot" || ! nginx_container_include_matches_slot "$candidate_slot" || ! nginx_test; then
     restore_nginx_include "$include_backup" || true
     rm -f "$include_backup"
+    remove_prometheus_file_sd_backup "$prometheus_backup"
     podman_cmd rm -f "$candidate_slot" >/dev/null 2>&1 || true
     die "candidate Nginx config failed"
   fi
@@ -520,13 +593,17 @@ deploy() {
   if ! save_state; then
     restore_nginx_include "$include_backup" || true
     rm -f "$include_backup"
+    remove_prometheus_file_sd_backup "$prometheus_backup"
     podman_cmd rm -f "$candidate_slot" >/dev/null 2>&1 || true
     die "failed to save pending rollback state"
   fi
 
   if ! nginx_reload || ! edge_smoke_retry; then
-    rollback_after_flip "$include_backup" "$candidate_slot"
+    rollback_after_flip "$include_backup" "$candidate_slot" "$prometheus_backup"
     die "post-cutover smoke failed; rolled back"
+  fi
+  if ! write_prometheus_file_sd_active_target "$candidate_slot"; then
+    log "warning: Prometheus file-SD publish failed; preserving successful backend cutover"
   fi
 
   new_image="$(container_image_id "$candidate_slot")"
@@ -541,6 +618,8 @@ deploy() {
     restore_include_or_die "$include_backup"
     rm -f "$include_backup"
     edge_smoke_retry || die "post-save rollback edge smoke failed"
+    restore_prometheus_file_sd_active_target "$prometheus_backup" || die "failed to restore Prometheus file-SD active target"
+    remove_prometheus_file_sd_backup "$prometheus_backup"
     podman_cmd rm -f "$candidate_slot" >/dev/null 2>&1 || true
     active_slot="$old_active_slot"
     last_good_image="$old_last_good_image"
@@ -554,15 +633,16 @@ deploy() {
     die "failed to save deployment state; rolled back traffic"
   fi
   rm -f "$include_backup"
+  remove_prometheus_file_sd_backup "$prometheus_backup"
   podman_cmd stop "$old_slot" >/dev/null 2>&1 || true
   podman_cmd rm -f "$old_slot" >/dev/null 2>&1 || true
   log "deployed $expected_sha to $active_slot"
 }
 
 self_test() {
-  local original_repository_file original_state original_env original_lock original_candidate_lock original_include original_include_host original_wait original_edge
+  local original_repository_file original_state original_env original_lock original_candidate_lock original_include original_include_host original_prometheus_target original_wait original_edge
   local repository_file state_file env_file state_dir good_sha good_ref good_image old_image
-  local log_file include_file include_backup save_count_file
+  local log_file stderr_file include_file include_backup save_count_file
 
   assert_not_grep() {
     local pattern="$1" file="$2" status
@@ -591,6 +671,7 @@ self_test() {
   original_lock="$LOCK_FILE"
   original_include="$NGINX_UPSTREAM_INCLUDE"
   original_include_host="$NGINX_UPSTREAM_INCLUDE_HOST"
+  original_prometheus_target="$PROMETHEUS_FILE_SD_ACTIVE_TARGET"
   original_wait="$HEALTH_WAIT_ATTEMPTS"
   original_edge="$EDGE_SMOKE_ATTEMPTS"
 
@@ -608,6 +689,7 @@ self_test() {
   LOCK_FILE="$state_dir/deploy.lock"
   NGINX_UPSTREAM_INCLUDE="$include_file"
   NGINX_UPSTREAM_INCLUDE_HOST="$include_file"
+  PROMETHEUS_FILE_SD_ACTIVE_TARGET="$state_dir/backend-active.json"
   HEALTH_WAIT_ATTEMPTS=1
   EDGE_SMOKE_ATTEMPTS=1
   load_image_prefix
@@ -630,6 +712,22 @@ self_test() {
   fi
   [[ "$(inactive_slot "$SLOT_A")" == "$SLOT_B" ]]
   [[ "$(inactive_slot "$SLOT_B")" == "$SLOT_A" ]]
+  validate_prometheus_file_sd_path "$PROMETHEUS_FILE_SD_ACTIVE_TARGET"
+  write_prometheus_file_sd_active_target "$SLOT_A"
+  prometheus_file_sd_matches_slot "$SLOT_A"
+  include_backup="$(backup_prometheus_file_sd_active_target)"
+  write_prometheus_file_sd_active_target "$SLOT_B"
+  if (
+    mv() { return 1; }
+    restore_prometheus_file_sd_active_target "$include_backup"
+  ) 2>/dev/null; then
+    die "self-test accepted a non-atomic Prometheus file-SD restore"
+  fi
+  prometheus_file_sd_matches_slot "$SLOT_B"
+  assert_no_glob_matches "$state_dir/.backend-active.json.restore.*"
+  restore_prometheus_file_sd_active_target "$include_backup"
+  remove_prometheus_file_sd_backup "$include_backup"
+  prometheus_file_sd_matches_slot "$SLOT_A"
 
   active_slot="$SLOT_A"
   last_good_image="$old_image"
@@ -786,7 +884,10 @@ self_test() {
   }
   edge_smoke() { return 0; }
   flock() { return 0; }
+  write_prometheus_file_sd_active_target "$SLOT_B"
   deploy "$good_ref" "$good_sha"
+  prometheus_file_sd_matches_slot "$SLOT_A" ||
+    die "self-test did not restore drifted Prometheus file-SD target on no-op deploy"
   assert_no_glob_matches "$state_dir/.readle-backend-upstream.conf.backup.*"
   assert_not_grep "^pull " "$log_file"
 
@@ -907,6 +1008,7 @@ self_test() {
   include_file="$state_dir/backend-upstream-final-save.conf"
   printf '%s\n' "server $SLOT_A:8080;" > "$include_file"
   NGINX_UPSTREAM_INCLUDE_HOST="$include_file"
+  write_prometheus_file_sd_active_target "$SLOT_A"
   printf '%s\n' \
     "active_slot=$SLOT_A" \
     "last_good_image=$old_image" \
@@ -971,6 +1073,7 @@ self_test() {
     die "self-test accepted a final state save failure"
   fi
   [[ "$(cat "$NGINX_UPSTREAM_INCLUDE_HOST")" == "$(nginx_include_line "$SLOT_A")" ]]
+  prometheus_file_sd_matches_slot "$SLOT_A"
   grep -q 'save_state 3' "$log_file"
   [[ "$(grep -c "exec $NGINX nginx -s reload" "$log_file")" == 2 ]]
   grep -q '^edge_smoke_retry$' "$log_file"
@@ -981,9 +1084,76 @@ self_test() {
   [[ -z "$pending_rollback_image" && -z "$pending_rollback_revision" && -z "$pending_rollback_ref" ]]
 
   log_file="$(mktemp)"
+  include_file="$state_dir/backend-upstream-file-sd-publish.conf"
+  printf '%s\n' "server $SLOT_A:8080;" > "$include_file"
+  NGINX_UPSTREAM_INCLUDE_HOST="$include_file"
+  write_prometheus_file_sd_active_target "$SLOT_A"
+  printf '%s\n' \
+    "active_slot=$SLOT_A" \
+    "last_good_image=$old_image" \
+    "last_good_revision=$good_sha" \
+    "last_good_ref=$good_ref" \
+    'previous_image=' \
+    'previous_revision=' \
+    'previous_ref=' \
+    'pending_rollback_image=' \
+    'pending_rollback_revision=' \
+    'pending_rollback_ref=' > "$STATE_FILE"
+  stderr_file="$(mktemp)"
+  if ! (
+    write_prometheus_file_sd_active_target() {
+      printf '%s\n' "write_prometheus_file_sd_active_target $*" >> "$log_file"
+      return 1
+    }
+    podman_cmd() {
+      printf '%s\n' "$*" >> "$log_file"
+      case "$*" in
+        "container exists $NGINX"|"container exists $SLOT_A") return 0 ;;
+        "container exists $SLOT_B") return 1 ;;
+        "inspect $SLOT_A --format {{.State.Running}}") printf '%s\n' true; return 0 ;;
+        "inspect $SLOT_A --format {{.Image}}") printf '%s\n' "$old_image"; return 0 ;;
+        "inspect $SLOT_B --format {{.Image}}") printf '%s\n' "$good_image"; return 0 ;;
+        *"HostConfig.PortBindings"*) return 0 ;;
+        "inspect $SLOT_A --format {{.HostConfig.Memory}}") memory_limit_bytes; return 0 ;;
+        "inspect $NGINX --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK"; return 0 ;;
+        "inspect $SLOT_A --format "*NetworkSettings.Networks*) printf '%s\n' "$PUBLIC_NETWORK $PRIVATE_NETWORK"; return 0 ;;
+        "exec $NGINX sh -c grep -R -F 'include $NGINX_UPSTREAM_INCLUDE;' /etc/nginx >/dev/null 2>&1") return 0 ;;
+        "exec $NGINX sh -c test -f $NGINX_UPSTREAM_INCLUDE && cat $NGINX_UPSTREAM_INCLUDE") cat "$NGINX_UPSTREAM_INCLUDE_HOST"; return 0 ;;
+        "pull $good_ref") return 0 ;;
+        "image inspect $good_ref --format "*) printf '%s\n' "$good_sha"; return 0 ;;
+        "run -d --restart=always --name $SLOT_B --network $PUBLIC_NETWORK --env-file $ENV_FILE --memory=$MEMORY_LIMIT --label $DEPLOY_LABEL=$good_ref $good_ref") return 0 ;;
+        "network connect $PRIVATE_NETWORK $SLOT_B") return 0 ;;
+        "inspect $SLOT_B --format {{.State.Health.Status}}") printf '%s\n' healthy; return 0 ;;
+        "exec $SLOT_B curl --fail --silent $READINESS_URL") return 0 ;;
+        "exec $NGINX nginx -t"|"exec $NGINX nginx -s reload") return 0 ;;
+        "stop $SLOT_A"|"rm -f $SLOT_A") return 0 ;;
+        *) printf 'unexpected podman command: %s\n' "$*" >&2; return 1 ;;
+      esac
+    }
+    edge_smoke() { return 1; }
+    edge_smoke_retry() { printf '%s\n' edge_smoke_retry >> "$log_file"; return 0; }
+    flock() { return 0; }
+    deploy "$good_ref" "$good_sha"
+  ) 2>"$stderr_file"; then
+    die "self-test rejected a best-effort Prometheus file-SD publish failure"
+  fi
+  [[ "$(cat "$NGINX_UPSTREAM_INCLUDE_HOST")" == "$(nginx_include_line "$SLOT_B")" ]]
+  prometheus_file_sd_matches_slot "$SLOT_A"
+  [[ "$(grep -c "exec $NGINX nginx -s reload" "$log_file")" == 1 ]]
+  grep -q '^edge_smoke_retry$' "$log_file"
+  grep -q "stop $SLOT_A" "$log_file"
+  grep -q "rm -f $SLOT_A" "$log_file"
+  grep -q "write_prometheus_file_sd_active_target $SLOT_B" "$log_file"
+  grep -q "warning: Prometheus file-SD publish failed; preserving successful backend cutover" "$stderr_file"
+  load_state
+  [[ "$active_slot" == "$SLOT_B" && "$last_good_image" == "$good_image" ]]
+  [[ -z "$pending_rollback_image" && -z "$pending_rollback_revision" && -z "$pending_rollback_ref" ]]
+
+  log_file="$(mktemp)"
   include_file="$state_dir/backend-upstream-pending-save.conf"
   printf '%s\n' "server $SLOT_A:8080;" > "$include_file"
   NGINX_UPSTREAM_INCLUDE_HOST="$include_file"
+  write_prometheus_file_sd_active_target "$SLOT_A"
   printf '%s\n' \
     "active_slot=$SLOT_A" \
     "last_good_image=$old_image" \
@@ -1031,11 +1201,13 @@ self_test() {
     die "self-test accepted a pending rollback save failure"
   fi
   [[ "$(cat "$NGINX_UPSTREAM_INCLUDE_HOST")" == "$(nginx_include_line "$SLOT_A")" ]]
+  prometheus_file_sd_matches_slot "$SLOT_A"
   grep -q '^save_state$' "$log_file"
   grep -q "rm -f $SLOT_B" "$log_file"
   assert_not_grep "exec $NGINX nginx -s reload" "$log_file"
   assert_no_glob_matches "$state_dir/.readle-backend-upstream.conf.backup.*"
 
+  write_prometheus_file_sd_active_target "$SLOT_A"
   log_file="$(mktemp)"
   if (
     podman_cmd() {
@@ -1135,6 +1307,7 @@ self_test() {
   LOCK_FILE="$original_lock"
   NGINX_UPSTREAM_INCLUDE="$original_include"
   NGINX_UPSTREAM_INCLUDE_HOST="$original_include_host"
+  PROMETHEUS_FILE_SD_ACTIVE_TARGET="$original_prometheus_target"
   HEALTH_WAIT_ATTEMPTS="$original_wait"
   EDGE_SMOKE_ATTEMPTS="$original_edge"
   log "self-test passed"
