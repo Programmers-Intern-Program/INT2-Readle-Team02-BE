@@ -148,7 +148,7 @@ class QuizAiGradingServiceTest {
   }
 
   @Test
-  @DisplayName("AI 응답이 7초를 초과할 경우 타임아웃 발생 및 QUIZ_GRADING_FAILED 예외 발생")
+  @DisplayName("AI 응답이 설정된 타임아웃을 초과할 경우 타임아웃 발생 및 QUIZ_GRADING_FAILED 예외 발생")
   void gradeAnswerAsync_Timeout() throws Exception {
     given(promptLoader.loadPrompt(eq("quiz-grading.txt"), anyMap())).willReturn("system_prompt");
 
