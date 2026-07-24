@@ -16,6 +16,7 @@ import java.net.URI;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
 import java.util.Collection;
 import java.util.List;
@@ -183,7 +184,7 @@ public class WebCrawler {
                   }
                 }
               }
-            } catch (Exception e) {
+            } catch (CertificateParsingException e) {
               log.error("SSL 호스트명 검증에 실패했습니다. 대상 호스트: {}", host, e);
             }
             return false;
@@ -287,7 +288,7 @@ public class WebCrawler {
       return addresses[0];
     } catch (CustomException e) {
       throw e;
-    } catch (Exception e) {
+    } catch (UnknownHostException e) {
       throw new CustomException(ContentErrorCode.INVALID_URL, e);
     }
   }
