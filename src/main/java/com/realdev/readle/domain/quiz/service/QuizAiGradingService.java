@@ -41,7 +41,7 @@ public class QuizAiGradingService {
             () -> doGrade(question, submittedAnswer, articleText, retriesLeft < 1),
             gradingExecutor);
 
-    return task.orTimeout(3, TimeUnit.SECONDS)
+    return task.orTimeout(7, TimeUnit.SECONDS)
         .exceptionallyCompose(
             ex -> {
               task.cancel(true);
