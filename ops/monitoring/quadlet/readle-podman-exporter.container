@@ -1,0 +1,22 @@
+[Unit]
+Description=Readle prometheus-podman-exporter
+After=podman.socket
+Wants=podman.socket
+
+[Container]
+Image=quay.io/navidys/prometheus-podman-exporter@sha256:9215f242616c3661e3d4ded60ea3dfc773b71d4908430e5958fd5ae28bc89aef
+ContainerName=readle-podman-exporter
+Network=readle-private
+User=0:0
+Volume=/run/podman/podman.sock:/run/podman/podman.sock:ro
+Environment=CONTAINER_HOST=unix:///run/podman/podman.sock
+Environment=HOME=/tmp
+Environment=XDG_CONFIG_HOME=/tmp
+PodmanArgs=--memory=64m --cap-drop=all --security-opt=no-new-privileges --read-only --tmpfs=/tmp:rw,noexec,nosuid,nodev,size=8m
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

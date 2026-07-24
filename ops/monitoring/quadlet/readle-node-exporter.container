@@ -1,0 +1,20 @@
+[Unit]
+Description=Readle node_exporter
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=quay.io/prometheus/node-exporter@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
+ContainerName=readle-node-exporter
+Network=readle-private
+Volume=/:/host:ro,rslave
+Volume=/var/lib/node_exporter/textfile_collector:/var/lib/node_exporter/textfile_collector:ro
+PodmanArgs=--memory=32m --pid=host --cap-drop=all --security-opt=no-new-privileges --read-only
+Exec=--path.rootfs=/host --web.listen-address=:9100 --collector.textfile.directory=/var/lib/node_exporter/textfile_collector --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containers/.+|var/lib/containers/.+)($|/)
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

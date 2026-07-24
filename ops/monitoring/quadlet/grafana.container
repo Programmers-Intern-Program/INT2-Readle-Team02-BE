@@ -1,0 +1,25 @@
+[Unit]
+Description=Readle Grafana
+After=prometheus.service
+Wants=prometheus.service
+
+[Container]
+Image=docker.io/grafana/grafana@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
+ContainerName=grafana
+Network=readle-public
+Network=readle-private
+Volume=/opt/readle/monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+Volume=/opt/readle/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+Volume=/opt/readle/monitoring/grafana/dashboards:/etc/grafana/provisioning-dashboards:ro
+Volume=/var/lib/readle/monitoring/grafana:/var/lib/grafana
+Volume=/etc/readle/monitoring/grafana-admin-password:/run/secrets/grafana-admin-password:ro
+Environment=GF_SECURITY_ADMIN_USER=admin
+Environment=GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/grafana-admin-password
+PodmanArgs=--memory=512m --cap-drop=all --security-opt=no-new-privileges
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

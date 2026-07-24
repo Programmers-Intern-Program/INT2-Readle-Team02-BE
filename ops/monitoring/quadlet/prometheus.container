@@ -1,0 +1,22 @@
+[Unit]
+Description=Readle Prometheus
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=quay.io/prometheus/prometheus@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+ContainerName=prometheus
+Network=readle-private
+Volume=/opt/readle/monitoring/prometheus:/etc/prometheus:ro
+Volume=/var/lib/readle/monitoring/prometheus/file_sd:/etc/prometheus/file_sd:ro
+Volume=/var/lib/readle/monitoring/prometheus:/prometheus
+Volume=/etc/readle/monitoring/backend-metrics-password:/run/secrets/readle-backend-metrics-password:ro
+PodmanArgs=--memory=256m --cap-drop=all --security-opt=no-new-privileges --read-only --tmpfs=/tmp:rw,noexec,nosuid,nodev,size=16m
+Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=3d --storage.tsdb.retention.size=512MB
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
