@@ -72,7 +72,7 @@ dependencies {
 	testAnnotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
-	testImplementation 'com.tngtech.archunit:archunit-junit5:1.4.2'
+	testImplementation 'com.tngtech.archunit:archunit-junit5:1.5.0'
 	testImplementation 'org.testcontainers:junit-jupiter'
 	testImplementation 'org.testcontainers:mysql'
 	testCompileOnly 'org.projectlombok:lombok'
